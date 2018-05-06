@@ -1,0 +1,6 @@
+[package]
+name = "jieba-rs"
+version = "0.1.0"
+authors = ["messense <messense@icloud.com>"]
+
+[dependencies]
