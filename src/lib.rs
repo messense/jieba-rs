@@ -1,9 +1,11 @@
 extern crate radix_trie;
+extern crate smallvec;
 
 use std::io::{self, BufRead, BufReader};
 use std::collections::BTreeMap;
 
 use radix_trie::{Trie, TrieCommon};
+use smallvec::SmallVec;
 
 static DEFAULT_DICT: &str = include_str!("dict/dict.txt");
 
@@ -57,13 +59,13 @@ impl Jieba {
     }
 
     // FIXME: Use a proper DAG impl?
-    fn dag(&self, sentence: &str) -> BTreeMap<usize, Vec<usize>> {
+    fn dag(&self, sentence: &str) -> BTreeMap<usize, SmallVec<[usize; 5]>> {
         let mut dag = BTreeMap::new();
         let char_indices: Vec<(usize, char)> = sentence.char_indices().collect();
         let word_count = char_indices.len();
         let mut char_buf = [0; 4];
         for (k, &(start_index, chr)) in char_indices.iter().enumerate() {
-            let mut tmplist = Vec::new();
+            let mut tmplist = SmallVec::new();
             let mut i = k;
             let mut wfrag: &str = chr.encode_utf8(&mut char_buf);
             while i < word_count {
@@ -93,6 +95,7 @@ impl Jieba {
 
 #[cfg(test)]
 mod tests {
+    use smallvec::SmallVec;
     use super::Jieba;
 
     #[test]
@@ -104,10 +107,10 @@ mod tests {
     fn test_dag() {
         let jieba = Jieba::new();
         let dag = jieba.dag("网球拍卖会");
-        assert_eq!(dag[&0], vec![0, 1, 2]);
-        assert_eq!(dag[&1], vec![1, 2]);
-        assert_eq!(dag[&2], vec![2, 3, 4]);
-        assert_eq!(dag[&3], vec![3]);
-        assert_eq!(dag[&4], vec![4]);
+        assert_eq!(dag[&0], SmallVec::from_buf([0, 1, 2]));
+        assert_eq!(dag[&1], SmallVec::from_buf([1, 2]));
+        assert_eq!(dag[&2], SmallVec::from_buf([2, 3, 4]));
+        assert_eq!(dag[&3], SmallVec::from_buf([3]));
+        assert_eq!(dag[&4], SmallVec::from_buf([4]));
     }
 }

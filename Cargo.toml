@@ -5,3 +5,4 @@ authors = ["messense <messense@icloud.com>"]
 
 [dependencies]
 radix_trie = "0.1"
+smallvec = "0.6"
