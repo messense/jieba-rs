@@ -3,11 +3,14 @@ extern crate smallvec;
 
 use std::io::{self, BufRead, BufReader};
 use std::collections::BTreeMap;
+use std::cmp::Ordering;
 
-use radix_trie::{Trie, TrieCommon};
+use radix_trie::Trie;
 use smallvec::SmallVec;
 
 static DEFAULT_DICT: &str = include_str!("dict/dict.txt");
+
+type DAG = BTreeMap<usize, SmallVec<[usize; 5]>>;
 
 #[derive(Debug)]
 pub struct Jieba {
@@ -58,8 +61,33 @@ impl Jieba {
         Ok(())
     }
 
+    fn calc(&self, sentence: &str, char_indices: &[(usize, char)], dag: &DAG) -> Vec<(f64, usize)> {
+        let word_count = char_indices.len();
+        let mut route = Vec::with_capacity(word_count + 1);
+        for _ in 0..word_count + 1 {
+            route.push((0.0, 0));
+        }
+        let logtotal = (self.total as f64).ln();
+        for i in (0..word_count).rev() {
+            let pair = dag[&i].iter().map(|x| {
+                let byte_start = char_indices[i].0;
+                let end_index = x + 1;
+                let byte_end = if end_index < char_indices.len() {
+                    char_indices[end_index].0
+                } else {
+                    sentence.len()
+                };
+                let wfrag = &sentence[byte_start..byte_end];
+                let freq = self.freq.get(wfrag).cloned().unwrap_or(1);
+                ((freq as f64).ln() - logtotal + route[x + 1].0, *x)
+            }).max_by(|x, y| x.partial_cmp(y).unwrap_or(Ordering::Equal));
+            route[i] = pair.unwrap();
+        }
+        route
+    }
+
     // FIXME: Use a proper DAG impl?
-    fn dag(&self, sentence: &str, char_indices: &[(usize, char)]) -> BTreeMap<usize, SmallVec<[usize; 5]>> {
+    fn dag(&self, sentence: &str, char_indices: &[(usize, char)]) -> DAG {
         let mut dag = BTreeMap::new();
         let word_count = char_indices.len();
         let mut char_buf = [0; 4];
@@ -125,6 +153,35 @@ impl Jieba {
         }
         words
     }
+
+    fn cut_dag_no_hmm(&self, sentence: &str) -> Vec<String> {
+        let char_indices: Vec<(usize, char)> = sentence.char_indices().collect();
+        let dag = self.dag(sentence, &char_indices);
+        let route = self.calc(sentence, &char_indices, &dag);
+        let mut words = Vec::new();
+        let mut x = 0;
+        let mut buf = String::new();
+        while x < char_indices.len() {
+            let y = route[x].1 + 1;
+            let l_indices = &char_indices[x..y];
+            if l_indices.len() == 1 && l_indices.iter().all(|ch| ch.1.is_ascii_alphanumeric()) {
+                buf.push(l_indices[0].1);
+                x = y;
+            } else {
+                if !buf.is_empty() {
+                    words.push(buf.clone());
+                    buf.clear();
+                }
+                words.push(l_indices.iter().map(|ch| ch.1).collect());
+                x = y;
+            }
+        }
+        if !buf.is_empty() {
+            words.push(buf.clone());
+            buf.clear();
+        }
+        words
+    }
 }
 
 #[cfg(test)]
@@ -155,5 +212,12 @@ mod tests {
         let jieba = Jieba::new();
         let words = jieba.cut_all_internal("网球拍卖会");
         assert_eq!(words, vec!["网球", "网球拍", "球拍", "拍卖", "拍卖会"]);
+    }
+
+    #[test]
+    fn test_cut_dag_no_hmm() {
+        let jieba = Jieba::new();
+        let words = jieba.cut_dag_no_hmm("网球拍卖会");
+        assert_eq!(words, vec!["网球", "拍卖会"]);
     }
 }
