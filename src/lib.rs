@@ -59,12 +59,11 @@ impl Jieba {
     }
 
     // FIXME: Use a proper DAG impl?
-    fn dag(&self, sentence: &str) -> BTreeMap<usize, SmallVec<[usize; 5]>> {
+    fn dag(&self, sentence: &str, char_indices: &[(usize, char)]) -> BTreeMap<usize, SmallVec<[usize; 5]>> {
         let mut dag = BTreeMap::new();
-        let char_indices: Vec<(usize, char)> = sentence.char_indices().collect();
         let word_count = char_indices.len();
         let mut char_buf = [0; 4];
-        for (k, &(start_index, chr)) in char_indices.iter().enumerate() {
+        for (k, &(byte_start, chr)) in char_indices.iter().enumerate() {
             let mut tmplist = SmallVec::new();
             let mut i = k;
             let mut wfrag: &str = chr.encode_utf8(&mut char_buf);
@@ -75,10 +74,10 @@ impl Jieba {
                     }
                     i += 1;
                     wfrag = if i + 1 < word_count {
-                        let end_index = char_indices[i + 1].0;
-                        &sentence[start_index..end_index]
+                        let byte_end = char_indices[i + 1].0;
+                        &sentence[byte_start..byte_end]
                     } else {
-                        &sentence[start_index..]
+                        &sentence[byte_start..]
                     };
                 } else {
                     break;
@@ -90,6 +89,41 @@ impl Jieba {
             dag.insert(k, tmplist);
         }
         dag
+    }
+
+    fn cut_all_internal<'a>(&self, sentence: &'a str) -> Vec<&'a str> {
+        let char_indices: Vec<(usize, char)> = sentence.char_indices().collect();
+        let dag = self.dag(sentence, &char_indices);
+        let mut words = Vec::new();
+        let mut old_j = -1;
+        for (k, list) in dag.into_iter() {
+            if list.len() == 1 && k as isize > old_j {
+                let byte_start = char_indices[k].0;
+                let end_index = list[0] + 1;
+                let byte_end = if end_index < char_indices.len() {
+                    char_indices[end_index].0
+                } else {
+                    sentence.len()
+                };
+                words.push(&sentence[byte_start..byte_end]);
+                old_j = list[0] as isize;
+            } else {
+                for j in list.into_iter() {
+                    if j > k {
+                        let byte_start = char_indices[k].0;
+                        let end_index = j + 1;
+                        let byte_end = if end_index < char_indices.len() {
+                            char_indices[end_index].0
+                        } else {
+                            sentence.len()
+                        };
+                        words.push(&sentence[byte_start..byte_end]);
+                        old_j = j as isize;
+                    }
+                }
+            }
+        }
+        words
     }
 }
 
@@ -106,11 +140,20 @@ mod tests {
     #[test]
     fn test_dag() {
         let jieba = Jieba::new();
-        let dag = jieba.dag("网球拍卖会");
+        let sentence = "网球拍卖会";
+        let char_indices: Vec<(usize, char)> = sentence.char_indices().collect();
+        let dag = jieba.dag(sentence, &char_indices);
         assert_eq!(dag[&0], SmallVec::from_buf([0, 1, 2]));
         assert_eq!(dag[&1], SmallVec::from_buf([1, 2]));
         assert_eq!(dag[&2], SmallVec::from_buf([2, 3, 4]));
         assert_eq!(dag[&3], SmallVec::from_buf([3]));
         assert_eq!(dag[&4], SmallVec::from_buf([4]));
+    }
+
+    #[test]
+    fn test_cut_all_internal() {
+        let jieba = Jieba::new();
+        let words = jieba.cut_all_internal("网球拍卖会");
+        assert_eq!(words, vec!["网球", "网球拍", "球拍", "拍卖", "拍卖会"]);
     }
 }
