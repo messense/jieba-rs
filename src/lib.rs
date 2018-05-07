@@ -8,7 +8,7 @@ use std::cmp::Ordering;
 use radix_trie::Trie;
 use smallvec::SmallVec;
 
-static DEFAULT_DICT: &str = include_str!("dict/dict.txt");
+static DEFAULT_DICT: &str = include_str!("data/dict.txt");
 
 type DAG = BTreeMap<usize, SmallVec<[usize; 5]>>;
 
