@@ -3,6 +3,7 @@ extern crate smallvec;
 extern crate regex;
 #[macro_use]
 extern crate lazy_static;
+extern crate phf;
 
 use std::io::{self, BufRead, BufReader};
 use std::collections::BTreeMap;
@@ -11,6 +12,8 @@ use std::cmp::Ordering;
 use regex::{Regex, Captures, CaptureMatches};
 use radix_trie::Trie;
 use smallvec::SmallVec;
+
+mod hmm;
 
 static DEFAULT_DICT: &str = include_str!("data/dict.txt");
 
@@ -42,7 +45,7 @@ impl<'r, 't> SplitCaptures<'r, 't> {
 }
 
 #[derive(Debug)]
-enum SplitState<'t> {
+pub(crate) enum SplitState<'t> {
     Unmatched(&'t str),
     Captured(Captures<'t>),
 }
@@ -238,15 +241,14 @@ impl Jieba {
             let l_indices = &char_indices[x..y];
             if l_indices.len() == 1 && l_indices.iter().all(|ch| ch.1.is_ascii_alphanumeric()) {
                 buf.push(l_indices[0].1);
-                x = y;
             } else {
                 if !buf.is_empty() {
                     words.push(buf.clone());
                     buf.clear();
                 }
                 words.push(l_indices.iter().map(|ch| ch.1).collect());
-                x = y;
             }
+            x = y;
         }
         if !buf.is_empty() {
             words.push(buf.clone());
@@ -255,7 +257,56 @@ impl Jieba {
         words
     }
 
-    pub fn cut(&self, sentence: &str) -> Vec<String> {
+    fn cut_dag_hmm(&self, sentence: &str) -> Vec<String> {
+        let char_indices: Vec<(usize, char)> = sentence.char_indices().collect();
+        let dag = self.dag(sentence, &char_indices);
+        let route = self.calc(sentence, &char_indices, &dag);
+        let mut words = Vec::new();
+        let mut x = 0;
+        let mut buf = String::new();
+        while x < char_indices.len() {
+            let y = route[x].1 + 1;
+            let l_indices = &char_indices[x..y];
+            if l_indices.len() == 1 {
+                buf.push(l_indices[0].1);
+            } else {
+                if !buf.is_empty() {
+                    if buf.chars().count() == 1 {
+                        words.push(buf.clone());
+                        buf.clear();
+                    } else {
+                        if self.freq.get(&buf).is_none() {
+                            words.extend(hmm::cut(&buf));
+                        } else {
+                            for chr in buf.chars() {
+                                words.push(chr.to_string());
+                            }
+                        }
+                        buf.clear();
+                    }
+                }
+                words.push(l_indices.iter().map(|ch| ch.1).collect());
+            }
+            x = y;
+        }
+        if !buf.is_empty() {
+            if buf.chars().count() == 1 {
+                words.push(buf.clone());
+                buf.clear();
+            } else {
+                if self.freq.get(&buf).is_none() {
+                    words.extend(hmm::cut(&buf));
+                } else {
+                    for chr in buf.chars() {
+                        words.push(chr.to_string());
+                    }
+                }
+            }
+        }
+        words
+    }
+
+    pub fn cut(&self, sentence: &str, hmm: bool) -> Vec<String> {
         let mut words = Vec::new();
         let splitter = SplitCaptures::new(&RE_HAN_DEFAULT, sentence);
         for state in splitter {
@@ -264,7 +315,11 @@ impl Jieba {
                 continue;
             }
             if RE_HAN_DEFAULT.is_match(block) {
-                words.extend(self.cut_dag_no_hmm(block));
+                if hmm {
+                    words.extend(self.cut_dag_hmm(block));
+                } else {
+                    words.extend(self.cut_dag_no_hmm(block));
+                }
             } else {
                 let skip_splitter = SplitCaptures::new(&RE_SKIP_DEAFULT, block);
                 for skip_state in skip_splitter {
@@ -328,7 +383,16 @@ mod tests {
     #[test]
     fn test_cut_no_hmm() {
         let jieba = Jieba::new();
-        let words = jieba.cut("abc网球拍卖会def");
+        let words = jieba.cut("abc网球拍卖会def", false);
         assert_eq!(words, vec!["abc", "网球", "拍卖会", "def"]);
+    }
+
+    #[test]
+    fn test_cut_with_hmm() {
+        let jieba = Jieba::new();
+        let words = jieba.cut("我们中出了一个叛徒", false);
+        assert_eq!(words, vec!["我们", "中", "出", "了", "一个", "叛徒"]);
+        let words = jieba.cut("我们中出了一个叛徒", true);
+        assert_eq!(words, vec!["我们", "中出", "了", "一个", "叛徒"]);
     }
 }
