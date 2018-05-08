@@ -6,3 +6,5 @@ authors = ["messense <messense@icloud.com>"]
 [dependencies]
 radix_trie = "0.1"
 smallvec = "0.6"
+regex = "1.0"
+lazy_static = "1.0"

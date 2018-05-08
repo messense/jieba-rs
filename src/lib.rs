@@ -1,16 +1,88 @@
 extern crate radix_trie;
 extern crate smallvec;
+extern crate regex;
+#[macro_use]
+extern crate lazy_static;
 
 use std::io::{self, BufRead, BufReader};
 use std::collections::BTreeMap;
 use std::cmp::Ordering;
 
+use regex::{Regex, Captures, CaptureMatches};
 use radix_trie::Trie;
 use smallvec::SmallVec;
 
 static DEFAULT_DICT: &str = include_str!("data/dict.txt");
 
 type DAG = BTreeMap<usize, SmallVec<[usize; 5]>>;
+
+lazy_static! {
+    static ref RE_HAN_DEFAULT: Regex = Regex::new(r"([\u{4E00}-\u{9FD5}a-zA-Z0-9+#&\._%]+)").unwrap();
+    static ref RE_SKIP_DEAFULT: Regex = Regex::new(r"(\r\n|\s)").unwrap();
+    static ref RE_HAN_CUT_ALL: Regex = Regex::new("([\u{4E00}-\u{9FD5}]+)").unwrap();
+    static ref RE_SKIP_CUT_ALL: Regex = Regex::new(r"[^a-zA-Z0-9+#\n]").unwrap();
+}
+
+struct SplitCaptures<'r, 't> {
+    finder: CaptureMatches<'r, 't>,
+    text: &'t str,
+    last: usize,
+    caps: Option<Captures<'t>>,
+}
+
+impl<'r, 't> SplitCaptures<'r, 't> {
+    fn new(re: &'r Regex, text: &'t str) -> SplitCaptures<'r, 't> {
+        SplitCaptures {
+            finder: re.captures_iter(text),
+            text: text,
+            last: 0,
+            caps: None,
+        }
+    }
+}
+
+#[derive(Debug)]
+enum SplitState<'t> {
+    Unmatched(&'t str),
+    Captured(Captures<'t>),
+}
+
+impl<'t> SplitState<'t> {
+    fn as_str(&'t self) -> &'t str {
+        match *self {
+            SplitState::Unmatched(t) => t,
+            SplitState::Captured(ref caps) => &caps[0],
+        }
+    }
+}
+
+impl<'r, 't> Iterator for SplitCaptures<'r, 't> {
+    type Item = SplitState<'t>;
+
+    fn next(&mut self) -> Option<SplitState<'t>> {
+        if let Some(caps) = self.caps.take() {
+            return Some(SplitState::Captured(caps));
+        }
+        match self.finder.next() {
+            None => {
+                if self.last >= self.text.len() {
+                    None
+                } else {
+                    let s = &self.text[self.last..];
+                    self.last = self.text.len();
+                    Some(SplitState::Unmatched(s))
+                }
+            }
+            Some(caps) => {
+                let m = caps.get(0).unwrap();
+                let unmatched = &self.text[self.last..m.start()];
+                self.last = m.end();
+                self.caps = Some(caps);
+                Some(SplitState::Unmatched(unmatched))
+            }
+        }
+    }
+}
 
 #[derive(Debug)]
 pub struct Jieba {
@@ -182,6 +254,38 @@ impl Jieba {
         }
         words
     }
+
+    pub fn cut(&self, sentence: &str) -> Vec<String> {
+        let mut words = Vec::new();
+        let splitter = SplitCaptures::new(&RE_HAN_DEFAULT, sentence);
+        for state in splitter {
+            let block = state.as_str();
+            if block.is_empty() {
+                continue;
+            }
+            if RE_HAN_DEFAULT.is_match(block) {
+                words.extend(self.cut_dag_no_hmm(block));
+            } else {
+                let skip_splitter = SplitCaptures::new(&RE_SKIP_DEAFULT, block);
+                for skip_state in skip_splitter {
+                    let x = skip_state.as_str();
+                    if x.is_empty() {
+                        continue;
+                    }
+                    if RE_SKIP_DEAFULT.is_match(x) {
+                        words.push(x.to_string());
+                    } else {
+                        let mut buf = [0; 4];
+                        for chr in x.chars() {
+                            let w = chr.encode_utf8(&mut buf);
+                            words.push(w.to_string());
+                        }
+                    }
+                }
+            }
+        }
+        words
+    }
 }
 
 #[cfg(test)]
@@ -219,5 +323,12 @@ mod tests {
         let jieba = Jieba::new();
         let words = jieba.cut_dag_no_hmm("网球拍卖会");
         assert_eq!(words, vec!["网球", "拍卖会"]);
+    }
+
+    #[test]
+    fn test_cut_no_hmm() {
+        let jieba = Jieba::new();
+        let words = jieba.cut("abc网球拍卖会def");
+        assert_eq!(words, vec!["abc", "网球", "拍卖会", "def"]);
     }
 }
