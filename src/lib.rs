@@ -306,28 +306,34 @@ impl Jieba {
         words
     }
 
-    pub fn cut(&self, sentence: &str, hmm: bool) -> Vec<String> {
+    pub fn cut_internal(&self, sentence: &str, cut_all: bool, hmm: bool) -> Vec<String> {
         let mut words = Vec::new();
-        let splitter = SplitCaptures::new(&RE_HAN_DEFAULT, sentence);
+        let re_han: &Regex = if cut_all { &*RE_HAN_CUT_ALL } else { &*RE_HAN_DEFAULT };
+        let re_skip: &Regex = if cut_all { &*RE_SKIP_CUT_ALL } else { &*RE_SKIP_DEAFULT };
+        let splitter = SplitCaptures::new(&re_han, sentence);
         for state in splitter {
             let block = state.as_str();
             if block.is_empty() {
                 continue;
             }
-            if RE_HAN_DEFAULT.is_match(block) {
-                if hmm {
-                    words.extend(self.cut_dag_hmm(block));
+            if re_han.is_match(block) {
+                if cut_all {
+                    words.extend(self.cut_all_internal(block).into_iter().map(String::from));
                 } else {
-                    words.extend(self.cut_dag_no_hmm(block));
+                    if hmm {
+                        words.extend(self.cut_dag_hmm(block));
+                    } else {
+                        words.extend(self.cut_dag_no_hmm(block));
+                    }
                 }
             } else {
-                let skip_splitter = SplitCaptures::new(&RE_SKIP_DEAFULT, block);
+                let skip_splitter = SplitCaptures::new(&re_skip, block);
                 for skip_state in skip_splitter {
                     let x = skip_state.as_str();
                     if x.is_empty() {
                         continue;
                     }
-                    if RE_SKIP_DEAFULT.is_match(x) {
+                    if re_skip.is_match(x) {
                         words.push(x.to_string());
                     } else {
                         let mut buf = [0; 4];
@@ -340,6 +346,14 @@ impl Jieba {
             }
         }
         words
+    }
+
+    pub fn cut(&self, sentence: &str, hmm: bool) -> Vec<String> {
+        self.cut_internal(sentence, false, hmm)
+    }
+
+    pub fn cut_all(&self, sentence: &str) -> Vec<String> {
+        self.cut_internal(sentence, true, false)
     }
 }
 
@@ -367,9 +381,9 @@ mod tests {
     }
 
     #[test]
-    fn test_cut_all_internal() {
+    fn test_cut_all() {
         let jieba = Jieba::new();
-        let words = jieba.cut_all_internal("网球拍卖会");
+        let words = jieba.cut_all("网球拍卖会");
         assert_eq!(words, vec!["网球", "网球拍", "球拍", "拍卖", "拍卖会"]);
     }
 
