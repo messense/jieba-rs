@@ -1,0 +1,23 @@
+sudo: required
+dist: trusty
+language: rust
+addons:
+  apt:
+    packages:
+      - libssl-dev
+rust:
+  - stable
+  - beta
+  - nightly
+
+script:
+  - cargo build
+  - cargo test
+
+after_success:
+  - |
+    if [[ "$TRAVIS_OS_NAME" == "linux" && "$TRAVIS_RUST_VERSION" == "nightly" ]]; then
+      bash <(curl https://raw.githubusercontent.com/xd009642/tarpaulin/master/travis-install.sh)
+      cargo tarpaulin --out Xml
+      bash <(curl -s https://codecov.io/bash)
+    fi
