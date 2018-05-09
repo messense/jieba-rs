@@ -38,7 +38,11 @@ fn viterbi(sentence: &str, char_indices: &[(usize, char)]) -> Vec<Status> {
     let mut V = vec![HashMap::new()];
     let mut path = HashMap::new();
     for y in &states {
-        let first_word = &sentence[char_indices[0].0..char_indices[1].0];
+        let first_word = if char_indices.len() > 1 {
+            &sentence[char_indices[0].0..char_indices[1].0]
+        } else {
+            &sentence[char_indices[0].0..]
+        };
         let prob = INITIAL_PROBS[*y as usize] + EMIT_PROBS[*y as usize].get(first_word).cloned().unwrap_or(MIN_FLOAT);
         V[0].insert(y, prob);
         path.insert(y, vec![y]);
