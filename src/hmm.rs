@@ -32,7 +32,7 @@ include!(concat!(env!("OUT_DIR"), "/hmm_prob.rs"));
 
 const MIN_FLOAT: f64 = -3.14e100;
 
-fn viterbi(sentence: &str, char_indices: &[(usize, char)]) -> Vec<Status> {
+fn viterbi(sentence: &str, char_indices: &[usize]) -> Vec<Status> {
     assert!(char_indices.len() > 1);
 
     let states = [Status::B, Status::M, Status::E, Status::S];
@@ -40,7 +40,7 @@ fn viterbi(sentence: &str, char_indices: &[(usize, char)]) -> Vec<Status> {
     let mut V = vec![FnvHashMap::default()];
     let mut path = FnvHashMap::default();
     for y in &states {
-        let first_word = &sentence[char_indices[0].0..char_indices[1].0];
+        let first_word = &sentence[char_indices[0]..char_indices[1]];
         let prob = INITIAL_PROBS[*y as usize] + EMIT_PROBS[*y as usize].get(first_word).cloned().unwrap_or(MIN_FLOAT);
         V[0].insert(y, prob);
         let mut initial = Vec::with_capacity(char_indices.len());
@@ -51,9 +51,9 @@ fn viterbi(sentence: &str, char_indices: &[(usize, char)]) -> Vec<Status> {
         V.push(FnvHashMap::default());
         let mut new_path = FnvHashMap::default();
         for y in &states {
-            let byte_start = char_indices[t].0;
+            let byte_start = char_indices[t];
             let byte_end = if t + 1 < char_indices.len() {
-                char_indices[t + 1].0
+                char_indices[t + 1]
             } else {
                 sentence.len()
             };
@@ -83,7 +83,7 @@ fn viterbi(sentence: &str, char_indices: &[(usize, char)]) -> Vec<Status> {
     best_path
 }
 
-fn cut_internal<'a>(sentence: &'a str, char_indices: Vec<(usize, char)>) -> Vec<&'a str> {
+fn cut_internal<'a>(sentence: &'a str, char_indices: Vec<usize>) -> Vec<&'a str> {
     let path = viterbi(sentence, &char_indices);
     let mut begin = 0;
     let mut next_i = 0;
@@ -93,9 +93,9 @@ fn cut_internal<'a>(sentence: &'a str, char_indices: Vec<(usize, char)>) -> Vec<
         match state {
             Status::B => begin = i,
             Status::E => {
-                let byte_start = char_indices[begin].0;
+                let byte_start = char_indices[begin];
                 let byte_end = if i + 1 < char_indices.len() {
-                    char_indices[i + 1].0
+                    char_indices[i + 1]
                 } else {
                     sentence.len()
                 };
@@ -103,9 +103,9 @@ fn cut_internal<'a>(sentence: &'a str, char_indices: Vec<(usize, char)>) -> Vec<
                 next_i = i + 1;
             },
             Status::S => {
-                let byte_start = char_indices[i].0;
+                let byte_start = char_indices[i];
                 let byte_end = if i + 1 < char_indices.len() {
-                    char_indices[i + 1].0
+                    char_indices[i + 1]
                 } else {
                     sentence.len()
                 };
@@ -116,7 +116,7 @@ fn cut_internal<'a>(sentence: &'a str, char_indices: Vec<(usize, char)>) -> Vec<
         }
     }
     if next_i < char_indices.len() {
-        let byte_start = char_indices[next_i].0;
+        let byte_start = char_indices[next_i];
         words.push(&sentence[byte_start..]);
     }
     words
@@ -132,7 +132,7 @@ pub fn cut<'a>(sentence: &'a str) -> Vec<&'a str> {
         }
         if RE_HAN.is_match(block) {
             if block.chars().count() > 1 {
-                let char_indices: Vec<(usize, char)> = block.char_indices().collect();
+                let char_indices: Vec<usize> = block.char_indices().map(|x| x.0).collect();
                 words.extend(cut_internal(block, char_indices));
             } else {
                 words.push(block);
@@ -160,7 +160,7 @@ mod tests {
         use super::Status::*;
 
         let sentence = "小明硕士毕业于中国科学院计算所";
-        let char_indices: Vec<(usize, char)> = sentence.char_indices().collect();
+        let char_indices: Vec<usize> = sentence.char_indices().map(|x| x.0).collect();
         let path = viterbi(sentence, &char_indices);
         assert_eq!(path, vec![B, E, B, E, B, M, E, B, E, B, M, E, B, E, S]);
     }

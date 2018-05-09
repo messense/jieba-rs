@@ -34,6 +34,7 @@ struct SplitCaptures<'r, 't> {
 }
 
 impl<'r, 't> SplitCaptures<'r, 't> {
+    #[inline]
     fn new(re: &'r Regex, text: &'t str) -> SplitCaptures<'r, 't> {
         SplitCaptures {
             finder: re.captures_iter(text),
@@ -51,6 +52,7 @@ pub(crate) enum SplitState<'t> {
 }
 
 impl<'t> SplitState<'t> {
+    #[inline]
     fn as_str(self) -> &'t str {
         match self {
             SplitState::Unmatched(t) => t,
@@ -124,10 +126,7 @@ impl Jieba {
                 for i in 1..char_indices.len() {
                     let index = char_indices[i];
                     let wfrag = &word[0..index];
-                    // XXX: this will do double hashing, should be avoided
-                    if self.freq.get(wfrag).is_none() {
-                        self.freq.insert(wfrag.to_string(), 0);
-                    }
+                    self.freq.entry(wfrag.to_string()).or_insert(0);
                 }
             }
             buf.clear();
@@ -136,7 +135,7 @@ impl Jieba {
         Ok(())
     }
 
-    fn calc(&self, sentence: &str, char_indices: &[(usize, char)], dag: &DAG) -> Vec<(f64, usize)> {
+    fn calc(&self, sentence: &str, char_indices: &[usize], dag: &DAG) -> Vec<(f64, usize)> {
         let word_count = char_indices.len();
         let mut route = Vec::with_capacity(word_count + 1);
         for _ in 0..word_count + 1 {
@@ -145,10 +144,10 @@ impl Jieba {
         let logtotal = (self.total as f64).ln();
         for i in (0..word_count).rev() {
             let pair = dag[&i].iter().map(|x| {
-                let byte_start = char_indices[i].0;
+                let byte_start = char_indices[i];
                 let end_index = x + 1;
                 let byte_end = if end_index < char_indices.len() {
-                    char_indices[end_index].0
+                    char_indices[end_index]
                 } else {
                     sentence.len()
                 };
@@ -162,14 +161,17 @@ impl Jieba {
     }
 
     // FIXME: Use a proper DAG impl?
-    fn dag(&self, sentence: &str, char_indices: &[(usize, char)]) -> DAG {
+    fn dag(&self, sentence: &str, char_indices: &[usize]) -> DAG {
         let mut dag = BTreeMap::new();
         let word_count = char_indices.len();
-        let mut char_buf = [0; 4];
-        for (k, &(byte_start, chr)) in char_indices.iter().enumerate() {
+        for (k, &byte_start) in char_indices.iter().enumerate() {
             let mut tmplist = SmallVec::new();
             let mut i = k;
-            let mut wfrag: &str = chr.encode_utf8(&mut char_buf);
+            let mut wfrag = if k + 1 < char_indices.len() {
+                &sentence[byte_start..char_indices[k + 1]]
+            } else {
+                &sentence[byte_start..]
+            };
             while i < word_count {
                 if let Some(freq) = self.freq.get(wfrag) {
                     if *freq > 0 {
@@ -177,7 +179,7 @@ impl Jieba {
                     }
                     i += 1;
                     wfrag = if i + 1 < word_count {
-                        let byte_end = char_indices[i + 1].0;
+                        let byte_end = char_indices[i + 1];
                         &sentence[byte_start..byte_end]
                     } else {
                         &sentence[byte_start..]
@@ -195,16 +197,16 @@ impl Jieba {
     }
 
     fn cut_all_internal<'a>(&self, sentence: &'a str) -> Vec<&'a str> {
-        let char_indices: Vec<(usize, char)> = sentence.char_indices().collect();
+        let char_indices: Vec<usize> = sentence.char_indices().map(|x| x.0).collect();
         let dag = self.dag(sentence, &char_indices);
         let mut words = Vec::new();
         let mut old_j = -1;
         for (k, list) in dag.into_iter() {
             if list.len() == 1 && k as isize > old_j {
-                let byte_start = char_indices[k].0;
+                let byte_start = char_indices[k];
                 let end_index = list[0] + 1;
                 let byte_end = if end_index < char_indices.len() {
-                    char_indices[end_index].0
+                    char_indices[end_index]
                 } else {
                     sentence.len()
                 };
@@ -213,10 +215,10 @@ impl Jieba {
             } else {
                 for j in list.into_iter() {
                     if j > k {
-                        let byte_start = char_indices[k].0;
+                        let byte_start = char_indices[k];
                         let end_index = j + 1;
                         let byte_end = if end_index < char_indices.len() {
-                            char_indices[end_index].0
+                            char_indices[end_index]
                         } else {
                             sentence.len()
                         };
@@ -230,7 +232,7 @@ impl Jieba {
     }
 
     fn cut_dag_no_hmm<'a>(&self, sentence: &'a str) -> Vec<&'a str> {
-        let char_indices: Vec<(usize, char)> = sentence.char_indices().collect();
+        let char_indices: Vec<usize> = sentence.char_indices().map(|x| x.0).collect();
         let dag = self.dag(sentence, &char_indices);
         let route = self.calc(sentence, &char_indices, &dag);
         let mut words = Vec::new();
@@ -239,14 +241,19 @@ impl Jieba {
         while x < char_indices.len() {
             let y = route[x].1 + 1;
             let l_indices = &char_indices[x..y];
-            if l_indices.len() == 1 && l_indices.iter().all(|ch| ch.1.is_ascii_alphanumeric()) {
+            let l_str = if y < char_indices.len() {
+                &sentence[char_indices[x]..char_indices[y]]
+            } else {
+                &sentence[char_indices[x]..]
+            };
+            if l_indices.len() == 1 && l_str.chars().all(|ch| ch.is_ascii_alphanumeric()) {
                 buf_indices.push(x);
             } else {
                 if !buf_indices.is_empty() {
-                    let byte_start = char_indices[buf_indices[0]].0;
+                    let byte_start = char_indices[buf_indices[0]];
                     let end_index = buf_indices[buf_indices.len() - 1] + 1;
                     let word = if end_index < char_indices.len() {
-                        let byte_end = char_indices[end_index].0;
+                        let byte_end = char_indices[end_index];
                         &sentence[byte_start..byte_end]
                     } else {
                         &sentence[byte_start..]
@@ -255,19 +262,19 @@ impl Jieba {
                     buf_indices.clear();
                 }
                 let word = if y < char_indices.len() {
-                    &sentence[char_indices[x].0..char_indices[y].0]
+                    &sentence[char_indices[x]..char_indices[y]]
                 } else {
-                    &sentence[char_indices[x].0..]
+                    &sentence[char_indices[x]..]
                 };
                 words.push(word);
             }
             x = y;
         }
         if !buf_indices.is_empty() {
-            let byte_start = char_indices[buf_indices[0]].0;
+            let byte_start = char_indices[buf_indices[0]];
             let end_index = buf_indices[buf_indices.len() - 1] + 1;
             let word = if end_index < char_indices.len() {
-                let byte_end = char_indices[end_index].0;
+                let byte_end = char_indices[end_index];
                 &sentence[byte_start..byte_end]
             } else {
                 &sentence[byte_start..]
@@ -279,7 +286,7 @@ impl Jieba {
     }
 
     fn cut_dag_hmm<'a>(&self, sentence: &'a str) -> Vec<&'a str> {
-        let char_indices: Vec<(usize, char)> = sentence.char_indices().collect();
+        let char_indices: Vec<usize> = sentence.char_indices().map(|x| x.0).collect();
         let dag = self.dag(sentence, &char_indices);
         let route = self.calc(sentence, &char_indices, &dag);
         let mut words = Vec::new();
@@ -292,10 +299,10 @@ impl Jieba {
                 buf_indices.push(x);
             } else {
                 if !buf_indices.is_empty() {
-                    let byte_start = char_indices[buf_indices[0]].0;
+                    let byte_start = char_indices[buf_indices[0]];
                     let end_index = buf_indices[buf_indices.len() - 1] + 1;
                     let word = if end_index < char_indices.len() {
-                        let byte_end = char_indices[end_index].0;
+                        let byte_end = char_indices[end_index];
                         &sentence[byte_start..byte_end]
                     } else {
                         &sentence[byte_start..]
@@ -321,19 +328,19 @@ impl Jieba {
                     buf_indices.clear();
                 }
                 let word = if y < char_indices.len() {
-                    &sentence[char_indices[x].0..char_indices[y].0]
+                    &sentence[char_indices[x]..char_indices[y]]
                 } else {
-                    &sentence[char_indices[x].0..]
+                    &sentence[char_indices[x]..]
                 };
                 words.push(word);
             }
             x = y;
         }
         if !buf_indices.is_empty() {
-            let byte_start = char_indices[buf_indices[0]].0;
+            let byte_start = char_indices[buf_indices[0]];
             let end_index = buf_indices[buf_indices.len() - 1] + 1;
             let word = if end_index < char_indices.len() {
-                let byte_end = char_indices[end_index].0;
+                let byte_end = char_indices[end_index];
                 &sentence[byte_start..byte_end]
             } else {
                 &sentence[byte_start..]
@@ -468,7 +475,7 @@ mod tests {
     fn test_dag() {
         let jieba = Jieba::new();
         let sentence = "网球拍卖会";
-        let char_indices: Vec<(usize, char)> = sentence.char_indices().collect();
+        let char_indices: Vec<usize> = sentence.char_indices().map(|x| x.0).collect();
         let dag = jieba.dag(sentence, &char_indices);
         assert_eq!(dag[&0], SmallVec::from_buf([0, 1, 2]));
         assert_eq!(dag[&1], SmallVec::from_buf([1, 2]));
