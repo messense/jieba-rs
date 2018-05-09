@@ -33,7 +33,7 @@ include!(concat!(env!("OUT_DIR"), "/hmm_prob.rs"));
 const MIN_FLOAT: f64 = -3.14e100;
 
 fn viterbi(sentence: &str, char_indices: &[(usize, char)]) -> Vec<Status> {
-    let states = [Status::B, Status::M, Status::E, Status::S];  // B E M S
+    let states = [Status::B, Status::M, Status::E, Status::S];
     #[allow(non_snake_case)]
     let mut V = vec![HashMap::new()];
     let mut path = HashMap::new();
