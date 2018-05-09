@@ -1,0 +1,11 @@
+[package]
+name = "weicheng"
+version = "0.1.0"
+authors = ["messense <messense@icloud.com>"]
+
+[dependencies]
+jieba-rs = { path = "../.." }
+
+[profile.release]
+lto = true
+debug = true
