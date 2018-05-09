@@ -1,5 +1,7 @@
 # jieba-rs
 
+[![Build Status](https://travis-ci.com/messense/jieba-rs.svg?branch=master)](https://travis-ci.com/messense/jieba-rs)
+[![codecov](https://codecov.io/gh/messense/jieba-rs/branch/master/graph/badge.svg)](https://codecov.io/gh/messense/jieba-rs)
 [![Crates.io](https://img.shields.io/crates/v/jieba-rs.svg)](https://crates.io/crates/jieba-rs)
 [![docs.rs](https://docs.rs/jieba-rs/badge.svg)](https://docs.rs/jieba-rs/)
 
