@@ -33,16 +33,14 @@ include!(concat!(env!("OUT_DIR"), "/hmm_prob.rs"));
 const MIN_FLOAT: f64 = -3.14e100;
 
 fn viterbi(sentence: &str, char_indices: &[(usize, char)]) -> Vec<Status> {
+    assert!(char_indices.len() > 1);
+
     let states = [Status::B, Status::M, Status::E, Status::S];
     #[allow(non_snake_case)]
     let mut V = vec![HashMap::new()];
     let mut path = HashMap::new();
     for y in &states {
-        let first_word = if char_indices.len() > 1 {
-            &sentence[char_indices[0].0..char_indices[1].0]
-        } else {
-            &sentence[char_indices[0].0..]
-        };
+        let first_word = &sentence[char_indices[0].0..char_indices[1].0];
         let prob = INITIAL_PROBS[*y as usize] + EMIT_PROBS[*y as usize].get(first_word).cloned().unwrap_or(MIN_FLOAT);
         V[0].insert(y, prob);
         path.insert(y, vec![y]);
@@ -131,8 +129,12 @@ pub fn cut(sentence: &str) -> Vec<String> {
             continue;
         }
         if RE_HAN.is_match(block) {
-            let char_indices: Vec<(usize, char)> = block.char_indices().collect();
-            words.extend(cut_internal(block, &char_indices).into_iter().map(String::from));
+            if block.chars().count() > 1 {
+                let char_indices: Vec<(usize, char)> = block.char_indices().collect();
+                words.extend(cut_internal(block, &char_indices).into_iter().map(String::from));
+            } else {
+                words.push(block.to_string());
+            }
         } else {
             let skip_splitter = SplitCaptures::new(&RE_SKIP, block);
             for skip_state in skip_splitter {
