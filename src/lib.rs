@@ -316,12 +316,12 @@ impl Jieba {
                             let word_indices: Vec<usize> = word.char_indices().map(|x| x.0).collect();
                             for wi in 0..word_indices.len() {
                                 let byte_start = word_indices[wi];
-                                if wi + 1 < word_indices.len() {
+                                let w = if wi + 1 < word_indices.len() {
                                     &word[byte_start..word_indices[wi + 1]]
                                 } else {
                                     &word[byte_start..]
                                 };
-                                words.push(word);
+                                words.push(w);
                             }
                         }
                     }
@@ -354,12 +354,12 @@ impl Jieba {
                     let word_indices: Vec<usize> = word.char_indices().map(|x| x.0).collect();
                     for wi in 0..word_indices.len() {
                         let byte_start = word_indices[wi];
-                        if wi + 1 < word_indices.len() {
+                        let w = if wi + 1 < word_indices.len() {
                             &word[byte_start..word_indices[wi + 1]]
                         } else {
                             &word[byte_start..]
                         };
-                        words.push(word);
+                        words.push(w);
                     }
                 }
             }
@@ -397,17 +397,19 @@ impl Jieba {
                     }
                     if re_skip.is_match(word) {
                         words.push(word);
-                    } else {
+                    } else if !cut_all {
                         let word_indices: Vec<usize> = word.char_indices().map(|x| x.0).collect();
                         for wi in 0..word_indices.len() {
                             let byte_start = word_indices[wi];
-                            if wi + 1 < word_indices.len() {
+                            let w = if wi + 1 < word_indices.len() {
                                 &word[byte_start..word_indices[wi + 1]]
                             } else {
                                 &word[byte_start..]
                             };
-                            words.push(word);
+                            words.push(w);
                         }
+                    } else {
+                        words.push(word);
                     }
                 }
             }
