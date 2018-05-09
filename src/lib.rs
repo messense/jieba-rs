@@ -1,17 +1,17 @@
-extern crate radix_trie;
 extern crate smallvec;
 extern crate regex;
 #[macro_use]
 extern crate lazy_static;
 extern crate phf;
+extern crate fnv;
 
 use std::io::{self, BufRead, BufReader};
 use std::collections::BTreeMap;
 use std::cmp::Ordering;
 
 use regex::{Regex, Captures, CaptureMatches};
-use radix_trie::Trie;
 use smallvec::SmallVec;
+use fnv::FnvHashMap;
 
 mod hmm;
 
@@ -89,7 +89,7 @@ impl<'r, 't> Iterator for SplitCaptures<'r, 't> {
 
 #[derive(Debug)]
 pub struct Jieba {
-    freq: Trie<String, usize>,
+    freq: FnvHashMap<String, usize>,
     total: usize
 }
 
@@ -102,7 +102,7 @@ impl Default for Jieba {
 impl Jieba {
     pub fn new() -> Self {
         let mut instance = Jieba {
-            freq: Trie::new(),
+            freq: FnvHashMap::default(),
             total: 0
         };
         let mut default_dict = BufReader::new(DEFAULT_DICT.as_bytes());

@@ -1,8 +1,8 @@
-use std::collections::HashMap;
 use std::cmp::Ordering;
 
 use phf;
 use regex::Regex;
+use fnv::FnvHashMap;
 
 use {SplitCaptures};
 
@@ -37,17 +37,19 @@ fn viterbi(sentence: &str, char_indices: &[(usize, char)]) -> Vec<Status> {
 
     let states = [Status::B, Status::M, Status::E, Status::S];
     #[allow(non_snake_case)]
-    let mut V = vec![HashMap::new()];
-    let mut path = HashMap::new();
+    let mut V = vec![FnvHashMap::default()];
+    let mut path = FnvHashMap::default();
     for y in &states {
         let first_word = &sentence[char_indices[0].0..char_indices[1].0];
         let prob = INITIAL_PROBS[*y as usize] + EMIT_PROBS[*y as usize].get(first_word).cloned().unwrap_or(MIN_FLOAT);
         V[0].insert(y, prob);
-        path.insert(y, vec![y]);
+        let mut initial = Vec::with_capacity(char_indices.len());
+        initial.push(y);
+        path.insert(y, initial);
     }
     for t in 1..char_indices.len() {
-        V.push(HashMap::new());
-        let mut new_path = HashMap::new();
+        V.push(FnvHashMap::default());
+        let mut new_path = FnvHashMap::default();
         for y in &states {
             let byte_start = char_indices[t].0;
             let byte_end = if t + 1 < char_indices.len() {
