@@ -2,7 +2,7 @@ use std::cmp::Ordering;
 
 use phf;
 use regex::Regex;
-use fnv::FnvHashMap;
+use fxhash::FxHashMap;
 
 use {SplitCaptures};
 
@@ -37,8 +37,10 @@ fn viterbi(sentence: &str, char_indices: &[usize]) -> Vec<Status> {
 
     let states = [Status::B, Status::M, Status::E, Status::S];
     #[allow(non_snake_case)]
-    let mut V = vec![FnvHashMap::default()];
-    let mut path = FnvHashMap::default();
+    let mut V = Vec::with_capacity(char_indices.len());
+    V.push(FxHashMap::with_capacity_and_hasher(states.len(), Default::default()));
+
+    let mut path = FxHashMap::default();
     for y in &states {
         let first_word = &sentence[char_indices[0]..char_indices[1]];
         let prob = INITIAL_PROBS[*y as usize] + EMIT_PROBS[*y as usize].get(first_word).cloned().unwrap_or(MIN_FLOAT);
@@ -48,8 +50,8 @@ fn viterbi(sentence: &str, char_indices: &[usize]) -> Vec<Status> {
         path.insert(y, initial);
     }
     for t in 1..char_indices.len() {
-        V.push(FnvHashMap::default());
-        let mut new_path = FnvHashMap::default();
+        V.push(FxHashMap::with_capacity_and_hasher(states.len(), Default::default()));
+        let mut new_path = FxHashMap::with_capacity_and_hasher(states.len(), Default::default());
         for y in &states {
             let byte_start = char_indices[t];
             let byte_end = if t + 1 < char_indices.len() {
@@ -87,7 +89,7 @@ fn cut_internal<'a>(sentence: &'a str, char_indices: Vec<usize>) -> Vec<&'a str>
     let path = viterbi(sentence, &char_indices);
     let mut begin = 0;
     let mut next_i = 0;
-    let mut words = Vec::new();
+    let mut words = Vec::with_capacity(char_indices.len() / 2);
     for i in 0..char_indices.len() {
         let state = path[i];
         match state {

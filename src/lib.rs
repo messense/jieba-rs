@@ -3,7 +3,7 @@ extern crate regex;
 #[macro_use]
 extern crate lazy_static;
 extern crate phf;
-extern crate fnv;
+extern crate fxhash;
 
 use std::io::{self, BufRead, BufReader};
 use std::collections::BTreeMap;
@@ -11,7 +11,7 @@ use std::cmp::Ordering;
 
 use regex::{Regex, Captures, CaptureMatches};
 use smallvec::SmallVec;
-use fnv::FnvHashMap;
+use fxhash::FxHashMap;
 
 mod hmm;
 
@@ -91,7 +91,7 @@ impl<'r, 't> Iterator for SplitCaptures<'r, 't> {
 
 #[derive(Debug)]
 pub struct Jieba {
-    freq: FnvHashMap<String, usize>,
+    freq: FxHashMap<String, usize>,
     total: usize
 }
 
@@ -104,7 +104,7 @@ impl Default for Jieba {
 impl Jieba {
     pub fn new() -> Self {
         let mut instance = Jieba {
-            freq: FnvHashMap::default(),
+            freq: FxHashMap::default(),
             total: 0
         };
         let mut default_dict = BufReader::new(DEFAULT_DICT.as_bytes());
@@ -199,7 +199,7 @@ impl Jieba {
     fn cut_all_internal<'a>(&self, sentence: &'a str) -> Vec<&'a str> {
         let char_indices: Vec<usize> = sentence.char_indices().map(|x| x.0).collect();
         let dag = self.dag(sentence, &char_indices);
-        let mut words = Vec::new();
+        let mut words = Vec::with_capacity(char_indices.len() / 2);
         let mut old_j = -1;
         for (k, list) in dag.into_iter() {
             if list.len() == 1 && k as isize > old_j {
@@ -235,7 +235,7 @@ impl Jieba {
         let char_indices: Vec<usize> = sentence.char_indices().map(|x| x.0).collect();
         let dag = self.dag(sentence, &char_indices);
         let route = self.calc(sentence, &char_indices, &dag);
-        let mut words = Vec::new();
+        let mut words = Vec::with_capacity(char_indices.len() / 2);
         let mut x = 0;
         let mut buf_indices = Vec::new();
         while x < char_indices.len() {
@@ -289,7 +289,7 @@ impl Jieba {
         let char_indices: Vec<usize> = sentence.char_indices().map(|x| x.0).collect();
         let dag = self.dag(sentence, &char_indices);
         let route = self.calc(sentence, &char_indices, &dag);
-        let mut words = Vec::new();
+        let mut words = Vec::with_capacity(char_indices.len() / 2);
         let mut x = 0;
         let mut buf_indices = Vec::new();
         while x < char_indices.len() {
