@@ -313,15 +313,17 @@ impl Jieba {
                         if !self.freq.get(word).map(|x| *x > 0).unwrap_or(false) {
                             words.extend(hmm::cut(word));
                         } else {
-                            let word_indices: Vec<usize> = word.char_indices().map(|x| x.0).collect();
-                            for wi in 0..word_indices.len() {
-                                let byte_start = word_indices[wi];
-                                let w = if wi + 1 < word_indices.len() {
-                                    &word[byte_start..word_indices[wi + 1]]
+                            let mut word_indices = word.char_indices().map(|x| x.0).peekable();
+                            loop {
+                                if let Some(byte_start) = word_indices.next() {
+                                    if let Some(byte_end) = word_indices.peek() {
+                                        words.push(&word[byte_start..*byte_end]);
+                                    } else {
+                                        words.push(&word[byte_start..]);
+                                    }
                                 } else {
-                                    &word[byte_start..]
-                                };
-                                words.push(w);
+                                    break;
+                                }
                             }
                         }
                     }
@@ -351,15 +353,17 @@ impl Jieba {
                 if !self.freq.get(word).map(|x| *x > 0).unwrap_or(false) {
                     words.extend(hmm::cut(word));
                 } else {
-                    let word_indices: Vec<usize> = word.char_indices().map(|x| x.0).collect();
-                    for wi in 0..word_indices.len() {
-                        let byte_start = word_indices[wi];
-                        let w = if wi + 1 < word_indices.len() {
-                            &word[byte_start..word_indices[wi + 1]]
+                    let mut word_indices = word.char_indices().map(|x| x.0).peekable();
+                    loop {
+                        if let Some(byte_start) = word_indices.next() {
+                            if let Some(byte_end) = word_indices.peek() {
+                                words.push(&word[byte_start..*byte_end]);
+                            } else {
+                                words.push(&word[byte_start..]);
+                            }
                         } else {
-                            &word[byte_start..]
-                        };
-                        words.push(w);
+                            break;
+                        }
                     }
                 }
             }
@@ -398,15 +402,17 @@ impl Jieba {
                     if re_skip.is_match(word) {
                         words.push(word);
                     } else if !cut_all {
-                        let word_indices: Vec<usize> = word.char_indices().map(|x| x.0).collect();
-                        for wi in 0..word_indices.len() {
-                            let byte_start = word_indices[wi];
-                            let w = if wi + 1 < word_indices.len() {
-                                &word[byte_start..word_indices[wi + 1]]
+                        let mut word_indices = word.char_indices().map(|x| x.0).peekable();
+                        loop {
+                            if let Some(byte_start) = word_indices.next() {
+                                if let Some(byte_end) = word_indices.peek() {
+                                    words.push(&word[byte_start..*byte_end]);
+                                } else {
+                                    words.push(&word[byte_start..]);
+                                }
                             } else {
-                                &word[byte_start..]
-                            };
-                            words.push(w);
+                                break;
+                            }
                         }
                     } else {
                         words.push(word);
