@@ -275,7 +275,7 @@ impl Jieba {
                         words.push(buf.clone());
                         buf.clear();
                     } else {
-                        if self.freq.get(&buf).is_none() {
+                        if !self.freq.get(&buf).map(|x| *x > 0).unwrap_or(false) {
                             words.extend(hmm::cut(&buf));
                         } else {
                             for chr in buf.chars() {
@@ -294,7 +294,7 @@ impl Jieba {
                 words.push(buf.clone());
                 buf.clear();
             } else {
-                if self.freq.get(&buf).is_none() {
+                if !self.freq.get(&buf).map(|x| *x > 0).unwrap_or(false) {
                     words.extend(hmm::cut(&buf));
                 } else {
                     for chr in buf.chars() {
@@ -355,6 +355,43 @@ impl Jieba {
     pub fn cut_all(&self, sentence: &str) -> Vec<String> {
         self.cut_internal(sentence, true, false)
     }
+
+    pub fn cut_for_search(&self, sentence: &str, hmm: bool) -> Vec<String> {
+        let words = self.cut(sentence, hmm);
+        let mut new_words = Vec::with_capacity(words.len());
+        for word in words {
+            let char_indices: Vec<usize> = word.char_indices().map(|x| x.0).collect();
+            let char_count = char_indices.len();
+            if char_count > 2 {
+                for i in 0..char_count - 1 {
+                    let byte_start = char_indices[i];
+                    let gram2 = if i + 2 < char_count {
+                        &word[byte_start..char_indices[i + 2]]
+                    } else {
+                        &word[byte_start..]
+                    };
+                    if self.freq.get(gram2).map(|x| *x > 0).unwrap_or(false) {
+                        new_words.push(gram2.to_string());
+                    }
+                }
+            }
+            if char_count > 3 {
+                for i in 0..char_count - 2 {
+                    let byte_start = char_indices[i];
+                    let gram3 = if i + 3 < char_count {
+                        &word[byte_start..char_indices[i + 3]]
+                    } else {
+                        &word[byte_start..]
+                    };
+                    if self.freq.get(gram3).map(|x| *x > 0).unwrap_or(false) {
+                        new_words.push(gram3.to_string());
+                    }
+                }
+            }
+            new_words.push(word);
+        }
+        new_words
+    }
 }
 
 #[cfg(test)]
@@ -408,5 +445,12 @@ mod tests {
         assert_eq!(words, vec!["我们", "中", "出", "了", "一个", "叛徒"]);
         let words = jieba.cut("我们中出了一个叛徒", true);
         assert_eq!(words, vec!["我们", "中出", "了", "一个", "叛徒"]);
+    }
+
+    #[test]
+    fn test_cut_for_search() {
+        let jieba = Jieba::new();
+        let words = jieba.cut_for_search("南京市长江大桥", true);
+        assert_eq!(words, vec!["南京", "京市", "南京市", "长江", "大桥", "长江大桥"]);
     }
 }
