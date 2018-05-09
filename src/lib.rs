@@ -51,10 +51,10 @@ pub(crate) enum SplitState<'t> {
 }
 
 impl<'t> SplitState<'t> {
-    fn as_str(&'t self) -> &'t str {
-        match *self {
+    fn as_str(self) -> &'t str {
+        match self {
             SplitState::Unmatched(t) => t,
-            SplitState::Captured(ref caps) => &caps[0],
+            SplitState::Captured(caps) => caps.get(0).unwrap().as_str(),
         }
     }
 }
@@ -229,84 +229,139 @@ impl Jieba {
         words
     }
 
-    fn cut_dag_no_hmm(&self, sentence: &str) -> Vec<String> {
+    fn cut_dag_no_hmm<'a>(&self, sentence: &'a str) -> Vec<&'a str> {
         let char_indices: Vec<(usize, char)> = sentence.char_indices().collect();
         let dag = self.dag(sentence, &char_indices);
         let route = self.calc(sentence, &char_indices, &dag);
         let mut words = Vec::new();
         let mut x = 0;
-        let mut buf = String::new();
+        let mut buf_indices = Vec::new();
         while x < char_indices.len() {
             let y = route[x].1 + 1;
             let l_indices = &char_indices[x..y];
             if l_indices.len() == 1 && l_indices.iter().all(|ch| ch.1.is_ascii_alphanumeric()) {
-                buf.push(l_indices[0].1);
+                buf_indices.push(x);
             } else {
-                if !buf.is_empty() {
-                    words.push(buf.clone());
-                    buf.clear();
+                if !buf_indices.is_empty() {
+                    let byte_start = char_indices[buf_indices[0]].0;
+                    let end_index = buf_indices[buf_indices.len() - 1] + 1;
+                    let word = if end_index < char_indices.len() {
+                        let byte_end = char_indices[end_index].0;
+                        &sentence[byte_start..byte_end]
+                    } else {
+                        &sentence[byte_start..]
+                    };
+                    words.push(word);
+                    buf_indices.clear();
                 }
-                words.push(l_indices.iter().map(|ch| ch.1).collect());
+                let word = if y < char_indices.len() {
+                    &sentence[char_indices[x].0..char_indices[y].0]
+                } else {
+                    &sentence[char_indices[x].0..]
+                };
+                words.push(word);
             }
             x = y;
         }
-        if !buf.is_empty() {
-            words.push(buf.clone());
-            buf.clear();
+        if !buf_indices.is_empty() {
+            let byte_start = char_indices[buf_indices[0]].0;
+            let end_index = buf_indices[buf_indices.len() - 1] + 1;
+            let word = if end_index < char_indices.len() {
+                let byte_end = char_indices[end_index].0;
+                &sentence[byte_start..byte_end]
+            } else {
+                &sentence[byte_start..]
+            };
+            words.push(word);
+            buf_indices.clear();
         }
         words
     }
 
-    fn cut_dag_hmm(&self, sentence: &str) -> Vec<String> {
+    fn cut_dag_hmm<'a>(&self, sentence: &'a str) -> Vec<&'a str> {
         let char_indices: Vec<(usize, char)> = sentence.char_indices().collect();
         let dag = self.dag(sentence, &char_indices);
         let route = self.calc(sentence, &char_indices, &dag);
         let mut words = Vec::new();
         let mut x = 0;
-        let mut buf = String::new();
+        let mut buf_indices = Vec::new();
         while x < char_indices.len() {
             let y = route[x].1 + 1;
             let l_indices = &char_indices[x..y];
             if l_indices.len() == 1 {
-                buf.push(l_indices[0].1);
+                buf_indices.push(x);
             } else {
-                if !buf.is_empty() {
-                    if buf.chars().count() == 1 {
-                        words.push(buf.clone());
-                        buf.clear();
+                if !buf_indices.is_empty() {
+                    let byte_start = char_indices[buf_indices[0]].0;
+                    let end_index = buf_indices[buf_indices.len() - 1] + 1;
+                    let word = if end_index < char_indices.len() {
+                        let byte_end = char_indices[end_index].0;
+                        &sentence[byte_start..byte_end]
                     } else {
-                        if !self.freq.get(&buf).map(|x| *x > 0).unwrap_or(false) {
-                            words.extend(hmm::cut(&buf));
+                        &sentence[byte_start..]
+                    };
+                    if buf_indices.len() == 1 {
+                        words.push(word);
+                    } else {
+                        if !self.freq.get(word).map(|x| *x > 0).unwrap_or(false) {
+                            words.extend(hmm::cut(word));
                         } else {
-                            for chr in buf.chars() {
-                                words.push(chr.to_string());
+                            let word_indices: Vec<usize> = word.char_indices().map(|x| x.0).collect();
+                            for wi in 0..word_indices.len() {
+                                let byte_start = word_indices[wi];
+                                if wi + 1 < word_indices.len() {
+                                    &word[byte_start..word_indices[wi + 1]]
+                                } else {
+                                    &word[byte_start..]
+                                };
+                                words.push(word);
                             }
                         }
-                        buf.clear();
                     }
+                    buf_indices.clear();
                 }
-                words.push(l_indices.iter().map(|ch| ch.1).collect());
+                let word = if y < char_indices.len() {
+                    &sentence[char_indices[x].0..char_indices[y].0]
+                } else {
+                    &sentence[char_indices[x].0..]
+                };
+                words.push(word);
             }
             x = y;
         }
-        if !buf.is_empty() {
-            if buf.chars().count() == 1 {
-                words.push(buf.clone());
-                buf.clear();
+        if !buf_indices.is_empty() {
+            let byte_start = char_indices[buf_indices[0]].0;
+            let end_index = buf_indices[buf_indices.len() - 1] + 1;
+            let word = if end_index < char_indices.len() {
+                let byte_end = char_indices[end_index].0;
+                &sentence[byte_start..byte_end]
             } else {
-                if !self.freq.get(&buf).map(|x| *x > 0).unwrap_or(false) {
-                    words.extend(hmm::cut(&buf));
+                &sentence[byte_start..]
+            };
+            if buf_indices.len() == 1 {
+                words.push(word);
+            } else {
+                if !self.freq.get(word).map(|x| *x > 0).unwrap_or(false) {
+                    words.extend(hmm::cut(word));
                 } else {
-                    for chr in buf.chars() {
-                        words.push(chr.to_string());
+                    let word_indices: Vec<usize> = word.char_indices().map(|x| x.0).collect();
+                    for wi in 0..word_indices.len() {
+                        let byte_start = word_indices[wi];
+                        if wi + 1 < word_indices.len() {
+                            &word[byte_start..word_indices[wi + 1]]
+                        } else {
+                            &word[byte_start..]
+                        };
+                        words.push(word);
                     }
                 }
             }
+            buf_indices.clear();
         }
         words
     }
 
-    pub fn cut_internal(&self, sentence: &str, cut_all: bool, hmm: bool) -> Vec<String> {
+    pub fn cut_internal<'a>(&self, sentence: &'a str, cut_all: bool, hmm: bool) -> Vec<&'a str> {
         let mut words = Vec::new();
         let re_han: &Regex = if cut_all { &*RE_HAN_CUT_ALL } else { &*RE_HAN_DEFAULT };
         let re_skip: &Regex = if cut_all { &*RE_SKIP_CUT_ALL } else { &*RE_SKIP_DEAFULT };
@@ -318,7 +373,7 @@ impl Jieba {
             }
             if re_han.is_match(block) {
                 if cut_all {
-                    words.extend(self.cut_all_internal(block).into_iter().map(String::from));
+                    words.extend(self.cut_all_internal(block));
                 } else {
                     if hmm {
                         words.extend(self.cut_dag_hmm(block));
@@ -329,17 +384,22 @@ impl Jieba {
             } else {
                 let skip_splitter = SplitCaptures::new(&re_skip, block);
                 for skip_state in skip_splitter {
-                    let x = skip_state.as_str();
-                    if x.is_empty() {
+                    let word = skip_state.as_str();
+                    if word.is_empty() {
                         continue;
                     }
-                    if re_skip.is_match(x) {
-                        words.push(x.to_string());
+                    if re_skip.is_match(word) {
+                        words.push(word);
                     } else {
-                        let mut buf = [0; 4];
-                        for chr in x.chars() {
-                            let w = chr.encode_utf8(&mut buf);
-                            words.push(w.to_string());
+                        let word_indices: Vec<usize> = word.char_indices().map(|x| x.0).collect();
+                        for wi in 0..word_indices.len() {
+                            let byte_start = word_indices[wi];
+                            if wi + 1 < word_indices.len() {
+                                &word[byte_start..word_indices[wi + 1]]
+                            } else {
+                                &word[byte_start..]
+                            };
+                            words.push(word);
                         }
                     }
                 }
@@ -348,15 +408,15 @@ impl Jieba {
         words
     }
 
-    pub fn cut(&self, sentence: &str, hmm: bool) -> Vec<String> {
+    pub fn cut<'a>(&self, sentence: &'a str, hmm: bool) -> Vec<&'a str> {
         self.cut_internal(sentence, false, hmm)
     }
 
-    pub fn cut_all(&self, sentence: &str) -> Vec<String> {
+    pub fn cut_all<'a>(&self, sentence: &'a str) -> Vec<&'a str> {
         self.cut_internal(sentence, true, false)
     }
 
-    pub fn cut_for_search(&self, sentence: &str, hmm: bool) -> Vec<String> {
+    pub fn cut_for_search<'a>(&self, sentence: &'a str, hmm: bool) -> Vec<&'a str> {
         let words = self.cut(sentence, hmm);
         let mut new_words = Vec::with_capacity(words.len());
         for word in words {
@@ -371,7 +431,7 @@ impl Jieba {
                         &word[byte_start..]
                     };
                     if self.freq.get(gram2).map(|x| *x > 0).unwrap_or(false) {
-                        new_words.push(gram2.to_string());
+                        new_words.push(gram2);
                     }
                 }
             }
@@ -384,7 +444,7 @@ impl Jieba {
                         &word[byte_start..]
                     };
                     if self.freq.get(gram3).map(|x| *x > 0).unwrap_or(false) {
-                        new_words.push(gram3.to_string());
+                        new_words.push(gram3);
                     }
                 }
             }
