@@ -89,6 +89,24 @@ impl<'r, 't> Iterator for SplitCaptures<'r, 't> {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TokenizeMode {
+    /// Default mode
+    Default,
+    /// Search mode
+    Search,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Token<'a> {
+    /// Word of the token
+    pub word: &'a str,
+    /// Unicode start position of the token
+    pub start: usize,
+    /// Unicode end position of the token
+    pub end: usize,
+}
+
 #[derive(Debug)]
 pub struct Jieba {
     freq: FxHashMap<String, usize>,
@@ -467,12 +485,78 @@ impl Jieba {
         }
         new_words
     }
+
+    pub fn tokenize<'a>(&self, sentence: &'a str, mode: TokenizeMode, hmm: bool) -> Vec<Token<'a>> {
+        let words = self.cut(sentence, hmm);
+        let mut tokens = Vec::with_capacity(words.len());
+        let mut start = 0;
+        match mode {
+            TokenizeMode::Default => {
+                for word in words {
+                    let width = word.chars().count();
+                    tokens.push(Token {
+                        word: word,
+                        start: start,
+                        end: start + width,
+                    });
+                    start += width;
+                }
+            }
+            TokenizeMode::Search => {
+                for word in words {
+                    let width = word.chars().count();
+                    if width > 2 {
+                        let char_indices: Vec<usize> = word.char_indices().map(|x| x.0).collect();
+                        for i in 0..width - 1 {
+                            let byte_start = char_indices[i];
+                            let gram2 = if i + 2 < width {
+                                &word[byte_start..char_indices[i + 2]]
+                            } else {
+                                &word[byte_start..]
+                            };
+                            if self.freq.get(gram2).map(|x| *x > 0).unwrap_or(false) {
+                                tokens.push(Token {
+                                    word: gram2,
+                                    start: start + i,
+                                    end: start + i + 2,
+                                });
+                            }
+                        }
+                        if width > 3 {
+                            for i in 0..width - 2 {
+                                let byte_start = char_indices[i];
+                                let gram3 = if i + 3 < width {
+                                    &word[byte_start..char_indices[i + 3]]
+                                } else {
+                                    &word[byte_start..]
+                                };
+                                if self.freq.get(gram3).map(|x| *x > 0).unwrap_or(false) {
+                                    tokens.push(Token {
+                                        word: gram3,
+                                        start: start + i,
+                                        end: start + i + 3,
+                                    });
+                                }
+                            }
+                        }
+                    }
+                    tokens.push(Token {
+                        word: word,
+                        start: start,
+                        end: start + width,
+                    });
+                    start += width;
+                }
+            }
+        }
+        tokens
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use smallvec::SmallVec;
-    use super::Jieba;
+    use super::{Jieba, Token, TokenizeMode};
 
     #[test]
     fn test_init_with_default_dict() {
@@ -529,5 +613,49 @@ mod tests {
         let jieba = Jieba::new();
         let words = jieba.cut_for_search("南京市长江大桥", true);
         assert_eq!(words, vec!["南京", "京市", "南京市", "长江", "大桥", "长江大桥"]);
+    }
+
+    #[test]
+    fn test_tokenize() {
+        let jieba = Jieba::new();
+        let tokens = jieba.tokenize("南京市长江大桥", TokenizeMode::Default, false);
+        assert_eq!(tokens, vec![Token { word: "南京市", start: 0, end: 3 }, Token { word: "长江大桥", start: 3, end: 7 }]);
+
+        let tokens = jieba.tokenize("南京市长江大桥", TokenizeMode::Search, false);
+        assert_eq!(
+            tokens,
+            vec![
+                Token { word: "南京", start: 0, end: 2 },
+                Token { word: "京市", start: 1, end: 3 },
+                Token { word: "南京市", start: 0, end: 3 },
+                Token { word: "长江", start: 3, end: 5 },
+                Token { word: "大桥", start: 5, end: 7 },
+                Token { word: "长江大桥", start: 3, end: 7 }
+            ]
+        );
+
+        let tokens = jieba.tokenize("我们中出了一个叛徒", TokenizeMode::Default, false);
+        assert_eq!(
+            tokens,
+            vec![
+                Token { word: "我们", start: 0, end: 2 },
+                Token { word: "中", start: 2, end: 3 },
+                Token { word: "出", start: 3, end: 4 },
+                Token { word: "了", start: 4, end: 5 },
+                Token { word: "一个", start: 5, end: 7 },
+                Token { word: "叛徒", start: 7, end: 9 }
+            ]
+        );
+        let tokens = jieba.tokenize("我们中出了一个叛徒", TokenizeMode::Default, true);
+        assert_eq!(
+            tokens,
+            vec![
+                Token { word: "我们", start: 0, end: 2 },
+                Token { word: "中出", start: 2, end: 4 },
+                Token { word: "了", start: 4, end: 5 },
+                Token { word: "一个", start: 5, end: 7 },
+                Token { word: "叛徒", start: 7, end: 9 }
+            ]
+        );
     }
 }
