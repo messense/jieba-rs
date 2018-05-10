@@ -609,6 +609,15 @@ mod tests {
     }
 
     #[test]
+    fn test_cut_weicheng() {
+        static WEICHENG_TXT: &str = include_str!("../examples/weicheng/src/weicheng.txt");
+        let jieba = Jieba::new();
+        for line in WEICHENG_TXT.split('\n') {
+            let _ = jieba.cut(line, true);
+        }
+    }
+
+    #[test]
     fn test_cut_for_search() {
         let jieba = Jieba::new();
         let words = jieba.cut_for_search("南京市长江大桥", true);
