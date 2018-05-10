@@ -2,7 +2,6 @@ use std::cmp::Ordering;
 
 use phf;
 use regex::Regex;
-use fxhash::FxHashMap;
 
 use {SplitCaptures};
 
@@ -37,21 +36,16 @@ fn viterbi(sentence: &str, char_indices: &[usize]) -> Vec<Status> {
 
     let states = [Status::B, Status::M, Status::E, Status::S];
     #[allow(non_snake_case)]
-    let mut V = Vec::with_capacity(char_indices.len());
-    V.push(FxHashMap::with_capacity_and_hasher(states.len(), Default::default()));
-
-    let mut path = FxHashMap::default();
+    let mut V = vec![vec![0.0; states.len()]; char_indices.len()];
+    let mut path = vec![vec![Status::B; char_indices.len()]; states.len()];
     for y in &states {
         let first_word = &sentence[char_indices[0]..char_indices[1]];
         let prob = INITIAL_PROBS[*y as usize] + EMIT_PROBS[*y as usize].get(first_word).cloned().unwrap_or(MIN_FLOAT);
-        V[0].insert(y, prob);
-        let mut initial = Vec::with_capacity(char_indices.len());
-        initial.push(y);
-        path.insert(y, initial);
+        V[0][*y as usize] = prob;
+        path[*y as usize][0] = *y;
     }
     for t in 1..char_indices.len() {
-        V.push(FxHashMap::with_capacity_and_hasher(states.len(), Default::default()));
-        let mut new_path = FxHashMap::with_capacity_and_hasher(states.len(), Default::default());
+        let mut new_path = vec![vec![Status::B; char_indices.len()]; states.len()];
         for y in &states {
             let byte_start = char_indices[t];
             let byte_end = if t + 1 < char_indices.len() {
@@ -64,24 +58,24 @@ fn viterbi(sentence: &str, char_indices: &[usize]) -> Vec<Status> {
             let (prob, state) = PREV_STATUS[*y as usize]
                 .iter()
                 .map(|y0| {
-                    (V[t - 1][y0] + TRANS_PROBS[*y0 as usize].get(*y as usize).cloned().unwrap_or(MIN_FLOAT) + em_prob, *y0)
+                    (V[t - 1][*y0 as usize] + TRANS_PROBS[*y0 as usize].get(*y as usize).cloned().unwrap_or(MIN_FLOAT) + em_prob, *y0)
                 })
                 .max_by(|x, y| x.partial_cmp(y).unwrap_or(Ordering::Equal))
                 .unwrap();
-            V[t].insert(y, prob);
-            let mut prev_path = path[&state].clone();
-            prev_path.push(y);
-            new_path.insert(y, prev_path);
+            V[t][*y as usize] = prob;
+            let mut prev_path = path[state as usize].clone();
+            prev_path[t] = *y;
+            new_path[*y as usize] = prev_path;
         }
         path = new_path;
     }
     let (_prob, state) = [Status::E, Status::S]
         .iter().map(|y| {
-            (V[char_indices.len() - 1][y], y)
+            (V[char_indices.len() - 1][*y as usize], y)
         })
         .max_by(|x, y| x.partial_cmp(y).unwrap_or(Ordering::Equal))
         .unwrap();
-    let best_path: Vec<Status> = path[state].iter().map(|x| **x).collect();
+    let best_path: Vec<Status> = path[*state as usize].iter().map(|x| *x).collect();
     best_path
 }
 
