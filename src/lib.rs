@@ -112,7 +112,7 @@ impl Jieba {
         instance
     }
 
-    pub fn load_dict<R: BufRead>(&mut self, dict: &mut R) -> io::Result<()> {
+    fn load_dict<R: BufRead>(&mut self, dict: &mut R) -> io::Result<()> {
         let mut buf = String::new();
         let mut total = 0;
         while dict.read_line(&mut buf)? > 0 {
@@ -372,7 +372,7 @@ impl Jieba {
         words
     }
 
-    pub fn cut_internal<'a>(&self, sentence: &'a str, cut_all: bool, hmm: bool) -> Vec<&'a str> {
+    fn cut_internal<'a>(&self, sentence: &'a str, cut_all: bool, hmm: bool) -> Vec<&'a str> {
         let mut words = Vec::new();
         let re_han: &Regex = if cut_all { &*RE_HAN_CUT_ALL } else { &*RE_HAN_DEFAULT };
         let re_skip: &Regex = if cut_all { &*RE_SKIP_CUT_ALL } else { &*RE_SKIP_DEAFULT };
