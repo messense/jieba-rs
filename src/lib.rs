@@ -1,3 +1,30 @@
+//! The Jieba Chinese Word Segmentation Implemented in Rust
+//!
+//! ## Installation
+//!
+//! Add it to your `Cargo.toml`:
+//!
+//! ```toml
+//! [dependencies]
+//! jieba-rs = "0.1"
+//! ```
+//!
+//! Add `extern crate jieba_rs` to your crate root and your're good to go!
+//!
+//! ## Example
+//!
+//! ```rust
+//! extern crate jieba_rs;
+//!
+//! use jieba_rs::Jieba;
+//!
+//! fn main() {
+//!     let jieba = Jieba::new();
+//!     let words = jieba.cut("我们中出了一个叛徒", false);
+//!     assert_eq!(words, vec!["我们", "中", "出", "了", "一个", "叛徒"]);
+//! }
+//! ```
+//!
 extern crate smallvec;
 extern crate regex;
 #[macro_use]
@@ -97,6 +124,7 @@ pub enum TokenizeMode {
     Search,
 }
 
+/// A Token
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Token<'a> {
     /// Word of the token
@@ -107,12 +135,16 @@ pub struct Token<'a> {
     pub end: usize,
 }
 
+/// A tagged word
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Tag<'a> {
+    /// Word
     pub word: &'a str,
+    /// Word tag
     pub tag: &'a str,
 }
 
+/// Jieba segmentation
 #[derive(Debug)]
 pub struct Jieba {
     dict: FxHashMap<String, (usize, String)>,
@@ -126,6 +158,7 @@ impl Default for Jieba {
 }
 
 impl Jieba {
+    /// Create a new instance with embed dict
     pub fn new() -> Self {
         let mut instance = Jieba {
             dict: FxHashMap::default(),
@@ -136,6 +169,7 @@ impl Jieba {
         instance
     }
 
+    /// Load dict
     fn load_dict<R: BufRead>(&mut self, dict: &mut R) -> io::Result<()> {
         let mut buf = String::new();
         let mut total = 0;
@@ -448,14 +482,33 @@ impl Jieba {
         words
     }
 
+    /// Cut the input text
+    ///
+    /// ## Params
+    ///
+    /// `sentence`: input text
+    ///
+    /// `hmm`: enable HMM or not
     pub fn cut<'a>(&self, sentence: &'a str, hmm: bool) -> Vec<&'a str> {
         self.cut_internal(sentence, false, hmm)
     }
 
+    /// Cut the input text, return all possible words
+    ///
+    /// ## Params
+    ///
+    /// `sentence`: input text
     pub fn cut_all<'a>(&self, sentence: &'a str) -> Vec<&'a str> {
         self.cut_internal(sentence, true, false)
     }
 
+    /// Cut the input text in search mode
+    ///
+    /// ## Params
+    ///
+    /// `sentence`: input text
+    ///
+    /// `hmm`: enable HMM or not
     pub fn cut_for_search<'a>(&self, sentence: &'a str, hmm: bool) -> Vec<&'a str> {
         let words = self.cut(sentence, hmm);
         let mut new_words = Vec::with_capacity(words.len());
@@ -493,6 +546,15 @@ impl Jieba {
         new_words
     }
 
+    /// Tokenize
+    ///
+    /// ## Params
+    ///
+    /// `sentence`: input text
+    ///
+    /// `mode`: tokenize mode
+    ///
+    /// `hmm`: enable HMM or not
     pub fn tokenize<'a>(&self, sentence: &'a str, mode: TokenizeMode, hmm: bool) -> Vec<Token<'a>> {
         let words = self.cut(sentence, hmm);
         let mut tokens = Vec::with_capacity(words.len());
@@ -559,6 +621,13 @@ impl Jieba {
         tokens
     }
 
+    /// Tag the input text
+    ///
+    /// ## Params
+    ///
+    /// `sentence`: input text
+    ///
+    /// `hmm`: enable HMM or not
     pub fn tag<'a>(&'a self, sentence: &'a str, hmm: bool) -> Vec<Tag<'a>> {
         let words = self.cut(sentence, hmm);
         let tags = words.into_iter().map(|word| {
