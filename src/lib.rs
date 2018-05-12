@@ -690,8 +690,8 @@ mod tests {
     #[test]
     fn test_cut_all() {
         let jieba = Jieba::new();
-        let words = jieba.cut_all("网球拍卖会");
-        assert_eq!(words, vec!["网球", "网球拍", "球拍", "拍卖", "拍卖会"]);
+        let words = jieba.cut_all("abc网球拍卖会def");
+        assert_eq!(words, vec!["abc", "网球", "网球拍", "球拍", "拍卖", "拍卖会", "def"]);
     }
 
     #[test]
