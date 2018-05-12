@@ -107,9 +107,15 @@ pub struct Token<'a> {
     pub end: usize,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Tag<'a> {
+    pub word: &'a str,
+    pub tag: &'a str,
+}
+
 #[derive(Debug)]
 pub struct Jieba {
-    freq: FxHashMap<String, usize>,
+    dict: FxHashMap<String, (usize, String)>,
     total: usize
 }
 
@@ -122,7 +128,7 @@ impl Default for Jieba {
 impl Jieba {
     pub fn new() -> Self {
         let mut instance = Jieba {
-            freq: FxHashMap::default(),
+            dict: FxHashMap::default(),
             total: 0
         };
         let mut default_dict = BufReader::new(DEFAULT_DICT.as_bytes());
@@ -138,13 +144,14 @@ impl Jieba {
                 let parts: Vec<&str> = buf.trim().split(' ').collect();
                 let word = parts[0];
                 let freq: usize = parts[1].parse().unwrap();
+                let tag = parts[2];
                 total += freq;
-                self.freq.insert(word.to_string(), freq);
+                self.dict.insert(word.to_string(), (freq, tag.to_string()));
                 let char_indices: Vec<usize> = word.char_indices().map(|x| x.0).collect();
                 for i in 1..char_indices.len() {
                     let index = char_indices[i];
                     let wfrag = &word[0..index];
-                    self.freq.entry(wfrag.to_string()).or_insert(0);
+                    self.dict.entry(wfrag.to_string()).or_insert((0, "".to_string()));
                 }
             }
             buf.clear();
@@ -170,7 +177,7 @@ impl Jieba {
                     sentence.len()
                 };
                 let wfrag = &sentence[byte_start..byte_end];
-                let freq = self.freq.get(wfrag).cloned().unwrap_or(1);
+                let freq = self.dict.get(wfrag).map(|x| x.0).unwrap_or(1);
                 ((freq as f64).ln() - logtotal + route[x + 1].0, *x)
             }).max_by(|x, y| x.partial_cmp(y).unwrap_or(Ordering::Equal));
             route[i] = pair.unwrap();
@@ -191,8 +198,8 @@ impl Jieba {
                 &sentence[byte_start..]
             };
             while i < word_count {
-                if let Some(freq) = self.freq.get(wfrag) {
-                    if *freq > 0 {
+                if let Some(freq) = self.dict.get(wfrag).map(|x| x.0) {
+                    if freq > 0 {
                         tmplist.push(i);
                     }
                     i += 1;
@@ -328,7 +335,7 @@ impl Jieba {
                     if buf_indices.len() == 1 {
                         words.push(word);
                     } else {
-                        if !self.freq.get(word).map(|x| *x > 0).unwrap_or(false) {
+                        if !self.dict.get(word).map(|x| x.0 > 0).unwrap_or(false) {
                             words.extend(hmm::cut(word));
                         } else {
                             let mut word_indices = word.char_indices().map(|x| x.0).peekable();
@@ -368,7 +375,7 @@ impl Jieba {
             if buf_indices.len() == 1 {
                 words.push(word);
             } else {
-                if !self.freq.get(word).map(|x| *x > 0).unwrap_or(false) {
+                if !self.dict.get(word).map(|x| x.0 > 0).unwrap_or(false) {
                     words.extend(hmm::cut(word));
                 } else {
                     let mut word_indices = word.char_indices().map(|x| x.0).peekable();
@@ -463,7 +470,7 @@ impl Jieba {
                     } else {
                         &word[byte_start..]
                     };
-                    if self.freq.get(gram2).map(|x| *x > 0).unwrap_or(false) {
+                    if self.dict.get(gram2).map(|x| x.0 > 0).unwrap_or(false) {
                         new_words.push(gram2);
                     }
                 }
@@ -476,7 +483,7 @@ impl Jieba {
                     } else {
                         &word[byte_start..]
                     };
-                    if self.freq.get(gram3).map(|x| *x > 0).unwrap_or(false) {
+                    if self.dict.get(gram3).map(|x| x.0 > 0).unwrap_or(false) {
                         new_words.push(gram3);
                     }
                 }
@@ -514,7 +521,7 @@ impl Jieba {
                             } else {
                                 &word[byte_start..]
                             };
-                            if self.freq.get(gram2).map(|x| *x > 0).unwrap_or(false) {
+                            if self.dict.get(gram2).map(|x| x.0 > 0).unwrap_or(false) {
                                 tokens.push(Token {
                                     word: gram2,
                                     start: start + i,
@@ -530,7 +537,7 @@ impl Jieba {
                                 } else {
                                     &word[byte_start..]
                                 };
-                                if self.freq.get(gram3).map(|x| *x > 0).unwrap_or(false) {
+                                if self.dict.get(gram3).map(|x| x.0 > 0).unwrap_or(false) {
                                     tokens.push(Token {
                                         word: gram3,
                                         start: start + i,
@@ -550,6 +557,41 @@ impl Jieba {
             }
         }
         tokens
+    }
+
+    pub fn tag<'a>(&'a self, sentence: &'a str, hmm: bool) -> Vec<Tag<'a>> {
+        let words = self.cut(sentence, hmm);
+        let tags = words.into_iter().map(|word| {
+            if let Some(tag) = self.dict.get(word) {
+                Tag {
+                    word,
+                    tag: &tag.1,
+                }
+            } else {
+                let mut eng = 0;
+                let mut m = 0;
+                for chr in word.chars() {
+                    if chr.is_ascii_alphanumeric() {
+                        eng += 1;
+                        if chr.is_ascii_digit() {
+                            m += 1;
+                        }
+                    }
+                }
+                let tag = if eng == 0 {
+                    "x"
+                } else if eng == m {
+                    "m"
+                } else {
+                    "eng"
+                };
+                Tag {
+                    word,
+                    tag,
+                }
+            }
+        }).collect();
+        tags
     }
 }
 
@@ -622,6 +664,41 @@ mod tests {
         let jieba = Jieba::new();
         let words = jieba.cut_for_search("南京市长江大桥", true);
         assert_eq!(words, vec!["南京", "京市", "南京市", "长江", "大桥", "长江大桥"]);
+    }
+
+    #[test]
+    fn test_tag() {
+        let jieba = Jieba::new();
+        let tags = jieba.tag("我是拖拉机学院手扶拖拉机专业的。不用多久，我就会升职加薪，当上CEO，走上人生巅峰。", true);
+        assert_eq!(
+            tags,
+            vec![
+                Tag { word: "我", tag: "r" },
+                Tag { word: "是", tag: "v" },
+                Tag { word: "拖拉机", tag: "n" },
+                Tag { word: "学院", tag: "n" },
+                Tag { word: "手扶拖拉机", tag: "n" },
+                Tag { word: "专业", tag: "n" },
+                Tag { word: "的", tag: "uj" },
+                Tag { word: "。", tag: "x" },
+                Tag { word: "不用", tag: "v" },
+                Tag { word: "多久", tag: "m" },
+                Tag { word: "，", tag: "x" },
+                Tag { word: "我", tag: "r" },
+                Tag { word: "就", tag: "d" },
+                Tag { word: "会", tag: "v" },
+                Tag { word: "升职", tag: "v" },
+                Tag { word: "加薪", tag: "nr" },
+                Tag { word: "，", tag: "x" },
+                Tag { word: "当上", tag: "t" },
+                Tag { word: "CEO", tag: "eng" },
+                Tag { word: "，", tag: "x" },
+                Tag { word: "走上", tag: "v" },
+                Tag { word: "人生", tag: "n" },
+                Tag { word: "巅峰", tag: "n" },
+                Tag { word: "。", tag: "x" }
+            ]
+        );
     }
 
     #[test]
