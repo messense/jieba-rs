@@ -97,7 +97,7 @@ pub enum TokenizeMode {
     Search,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Token<'a> {
     /// Word of the token
     pub word: &'a str,
