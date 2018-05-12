@@ -458,9 +458,9 @@ impl Jieba {
                     if word.is_empty() {
                         continue;
                     }
-                    if re_skip.is_match(word) {
+                    if cut_all || re_skip.is_match(word) {
                         words.push(word);
-                    } else if !cut_all {
+                    } else {
                         let mut word_indices = word.char_indices().map(|x| x.0).peekable();
                         loop {
                             if let Some(byte_start) = word_indices.next() {
@@ -473,8 +473,6 @@ impl Jieba {
                                 break;
                             }
                         }
-                    } else {
-                        words.push(word);
                     }
                 }
             }
