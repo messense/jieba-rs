@@ -667,7 +667,7 @@ impl Jieba {
 #[cfg(test)]
 mod tests {
     use smallvec::SmallVec;
-    use super::{Jieba, Token, TokenizeMode};
+    use super::{Jieba, Token, TokenizeMode, Tag};
 
     #[test]
     fn test_init_with_default_dict() {
