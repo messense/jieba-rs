@@ -13,7 +13,7 @@ Add it to your ``Cargo.toml``:
 
 ```toml
 [dependencies]
-jieba-rs = "0.1"
+jieba-rs = "0.2"
 ```
 
 Add ``extern crate jieba_rs`` to your crate root and your're good to go!
