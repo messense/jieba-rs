@@ -1,6 +1,6 @@
 [package]
 name = "jieba-rs"
-version = "0.2.0"
+version = "0.2.1"
 authors = ["messense <messense@icloud.com>"]
 description = "The Jieba Chinese Word Segmentation Implemented in Rust"
 keywords = ["nlp", "chinese", "segmenation"]
