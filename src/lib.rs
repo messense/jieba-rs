@@ -630,32 +630,33 @@ impl Jieba {
         let words = self.cut(sentence, hmm);
         let tags = words.into_iter().map(|word| {
             if let Some(tag) = self.dict.get(word) {
-                Tag {
-                    word,
-                    tag: &tag.1,
+                if tag.0 != 0 {
+                    return Tag {
+                        word,
+                        tag: &tag.1,
+                    };
                 }
-            } else {
-                let mut eng = 0;
-                let mut m = 0;
-                for chr in word.chars() {
-                    if chr.is_ascii_alphanumeric() {
-                        eng += 1;
-                        if chr.is_ascii_digit() {
-                            m += 1;
-                        }
+            }
+            let mut eng = 0;
+            let mut m = 0;
+            for chr in word.chars() {
+                if chr.is_ascii_alphanumeric() {
+                    eng += 1;
+                    if chr.is_ascii_digit() {
+                        m += 1;
                     }
                 }
-                let tag = if eng == 0 {
-                    "x"
-                } else if eng == m {
-                    "m"
-                } else {
-                    "eng"
-                };
-                Tag {
-                    word,
-                    tag,
-                }
+            }
+            let tag = if eng == 0 {
+                "x"
+            } else if eng == m {
+                "m"
+            } else {
+                "eng"
+            };
+            Tag {
+                word,
+                tag,
             }
         }).collect();
         tags
@@ -763,6 +764,30 @@ mod tests {
                 Tag { word: "走上", tag: "v" },
                 Tag { word: "人生", tag: "n" },
                 Tag { word: "巅峰", tag: "n" },
+                Tag { word: "。", tag: "x" }
+            ]
+        );
+
+        let tags = jieba.tag("今天纽约的天气真好啊，京华大酒店的张尧经理吃了一只北京烤鸭。", true);
+        assert_eq!(
+            tags,
+            vec![
+                Tag { word: "今天", tag: "t" },
+                Tag { word: "纽约", tag: "ns" },
+                Tag { word: "的", tag: "uj" },
+                Tag { word: "天气", tag: "n" },
+                Tag { word: "真好", tag: "d" },
+                Tag { word: "啊", tag: "zg" },
+                Tag { word: "，", tag: "x" },
+                Tag { word: "京华", tag: "nz" },
+                Tag { word: "大酒店", tag: "n" },
+                Tag { word: "的", tag: "uj" },
+                Tag { word: "张尧", tag: "x" },  // XXX: missing in dict
+                Tag { word: "经理", tag: "n" },
+                Tag { word: "吃", tag: "v" },
+                Tag { word: "了", tag: "ul" },
+                Tag { word: "一只", tag: "m" },
+                Tag { word: "北京烤鸭", tag: "n" },
                 Tag { word: "。", tag: "x" }
             ]
         );
