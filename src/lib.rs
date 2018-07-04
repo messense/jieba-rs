@@ -187,8 +187,17 @@ impl Jieba {
             {
                 let parts: Vec<&str> = buf.trim().split(' ').collect();
                 let word = parts[0];
-                let freq: usize = parts[1].parse().unwrap();
-                let tag = parts[2];
+                let freq: usize = if parts.len() > 1 {
+                    parts[1].parse().unwrap()
+                } else {
+                    // TODO: Suggest frequence
+                    10
+                };
+                let tag = if parts.len() > 2 {
+                    parts[2]
+                } else {
+                    ""
+                };
                 total += freq;
                 self.dict.insert(word.to_string(), (freq, tag.to_string()));
                 let char_indices: Vec<usize> = word.char_indices().map(|x| x.0).collect();
