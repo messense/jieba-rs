@@ -169,8 +169,18 @@ impl Jieba {
         instance
     }
 
+    /// Create a new instance with dict
+    pub fn new_with_dict<R: BufRead>(dict: &mut R) -> Self {
+        let mut instance = Jieba {
+            dict: FxHashMap::default(),
+            total: 0
+        };
+        instance.load_dict(dict).unwrap();
+        instance
+    }
+
     /// Load dict
-    fn load_dict<R: BufRead>(&mut self, dict: &mut R) -> io::Result<()> {
+    pub fn load_dict<R: BufRead>(&mut self, dict: &mut R) -> io::Result<()> {
         let mut buf = String::new();
         let mut total = 0;
         while dict.read_line(&mut buf)? > 0 {
@@ -190,7 +200,7 @@ impl Jieba {
             }
             buf.clear();
         }
-        self.total = total;
+        self.total += total;
         Ok(())
     }
 
