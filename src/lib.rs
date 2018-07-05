@@ -185,13 +185,15 @@ impl Jieba {
         let mut total = 0;
         while dict.read_line(&mut buf)? > 0 {
             {
-                let parts: Vec<&str> = buf.trim().split(' ').collect();
+                // Skip empty lines
+                let line = buf.trim();
+                if line.is_empty() { continue; }
+                let parts: Vec<&str> = line.split(' ').collect();
                 let word = parts[0];
                 let freq: usize = if parts.len() > 1 {
                     parts[1].parse().unwrap()
                 } else {
-                    // TODO: Suggest frequence
-                    10
+                    self.suggest_freq(word)
                 };
                 let tag = if parts.len() > 2 {
                     parts[2]
@@ -211,6 +213,21 @@ impl Jieba {
         }
         self.total += total;
         Ok(())
+    }
+
+    fn get_word_freq(&self, word: &str, default: usize) -> usize {
+        match self.dict.get(word) {
+            Some(e) => match e {
+                &(freq, _) => freq
+            },
+            _ => default
+        }
+    } 
+
+    pub fn suggest_freq(&self, segment: &str) -> usize {
+        let logtotal = (self.total as f64).ln();
+        let logfreq = self.cut(segment, false).iter().fold(0f64, |freq, word| freq + (self.get_word_freq(word, 1) as f64).ln() - logtotal);
+        std::cmp::max((logfreq + logtotal).exp() as usize + 1, self.get_word_freq(segment, 1))
     }
 
     fn calc(&self, sentence: &str, char_indices: &[usize], dag: &DAG) -> Vec<(f64, usize)> {
@@ -914,5 +931,13 @@ mod tests {
                 Token { word: "叛徒", start: 7, end: 9 }
             ]
         );
+    }
+
+    #[test]
+    fn test_suggest_freq() {
+        let jieba = Jieba::new();
+        // These values were calculated by original Jieba
+        assert_eq!(jieba.suggest_freq("中出"), 348);
+        assert_eq!(jieba.suggest_freq("出了"), 1263);
     }
 }
