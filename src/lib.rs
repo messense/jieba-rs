@@ -684,6 +684,7 @@ impl Jieba {
 
 #[cfg(test)]
 mod tests {
+    use std::io::BufReader;
     use smallvec::SmallVec;
     use super::{Jieba, Token, TokenizeMode, Tag};
 
@@ -850,6 +851,65 @@ mod tests {
                 Token { word: "我们", start: 0, end: 2 },
                 Token { word: "中出", start: 2, end: 4 },
                 Token { word: "了", start: 4, end: 5 },
+                Token { word: "一个", start: 5, end: 7 },
+                Token { word: "叛徒", start: 7, end: 9 }
+            ]
+        );
+    }
+
+    #[test]
+    fn test_userdict() {
+        let mut jieba = Jieba::new();
+        let tokens = jieba.tokenize("我们中出了一个叛徒", TokenizeMode::Default, false);
+        assert_eq!(
+            tokens,
+            vec![
+                Token { word: "我们", start: 0, end: 2 },
+                Token { word: "中", start: 2, end: 3 },
+                Token { word: "出", start: 3, end: 4 },
+                Token { word: "了", start: 4, end: 5 },
+                Token { word: "一个", start: 5, end: 7 },
+                Token { word: "叛徒", start: 7, end: 9 }
+            ]
+        );
+        let userdict = "中出 10000";
+        jieba.load_dict(&mut BufReader::new(userdict.as_bytes())).unwrap();
+        let tokens = jieba.tokenize("我们中出了一个叛徒", TokenizeMode::Default, false);
+        assert_eq!(
+            tokens,
+            vec![
+                Token { word: "我们", start: 0, end: 2 },
+                Token { word: "中出", start: 2, end: 4 },
+                Token { word: "了", start: 4, end: 5 },
+                Token { word: "一个", start: 5, end: 7 },
+                Token { word: "叛徒", start: 7, end: 9 }
+            ]
+        );
+    }
+
+    #[test]
+    fn test_userdict_hmm() {
+        let mut jieba = Jieba::new();
+        let tokens = jieba.tokenize("我们中出了一个叛徒", TokenizeMode::Default, true);
+        assert_eq!(
+            tokens,
+            vec![
+                Token { word: "我们", start: 0, end: 2 },
+                Token { word: "中出", start: 2, end: 4 },
+                Token { word: "了", start: 4, end: 5 },
+                Token { word: "一个", start: 5, end: 7 },
+                Token { word: "叛徒", start: 7, end: 9 }
+            ]
+        );
+        let userdict = "出了 10000";
+        jieba.load_dict(&mut BufReader::new(userdict.as_bytes())).unwrap();
+        let tokens = jieba.tokenize("我们中出了一个叛徒", TokenizeMode::Default, true);
+        assert_eq!(
+            tokens,
+            vec![
+                Token { word: "我们", start: 0, end: 2 },
+                Token { word: "中", start: 2, end: 3 },
+                Token { word: "出了", start: 3, end: 5 },
                 Token { word: "一个", start: 5, end: 7 },
                 Token { word: "叛徒", start: 7, end: 9 }
             ]
