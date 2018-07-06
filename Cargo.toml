@@ -1,6 +1,6 @@
 [package]
 name = "jieba-rs"
-version = "0.2.2"
+version = "0.2.3"
 authors = ["messense <messense@icloud.com>"]
 categories = ["text-processing"]
 description = "The Jieba Chinese Word Segmentation Implemented in Rust"
