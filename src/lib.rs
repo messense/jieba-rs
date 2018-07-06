@@ -169,16 +169,37 @@ impl Jieba {
         instance
     }
 
-    /// Load dict
-    fn load_dict<R: BufRead>(&mut self, dict: &mut R) -> io::Result<()> {
+    /// Create a new instance with dict
+    pub fn with_dict<R: BufRead>(dict: &mut R) -> io::Result<Self> {
+        let mut instance = Jieba {
+            dict: FxHashMap::default(),
+            total: 0
+        };
+        instance.load_dict(dict)?;
+        Ok(instance)
+    }
+
+    /// Load dictionary
+    pub fn load_dict<R: BufRead>(&mut self, dict: &mut R) -> io::Result<()> {
         let mut buf = String::new();
         let mut total = 0;
         while dict.read_line(&mut buf)? > 0 {
             {
-                let parts: Vec<&str> = buf.trim().split(' ').collect();
+                // Skip empty lines
+                let line = buf.trim();
+                if line.is_empty() { continue; }
+                let parts: Vec<&str> = line.split(' ').collect();
                 let word = parts[0];
-                let freq: usize = parts[1].parse().unwrap();
-                let tag = parts[2];
+                let freq: usize = if parts.len() > 1 {
+                    parts[1].parse().unwrap()
+                } else {
+                    self.suggest_freq(word)
+                };
+                let tag = if parts.len() > 2 {
+                    parts[2]
+                } else {
+                    ""
+                };
                 total += freq;
                 self.dict.insert(word.to_string(), (freq, tag.to_string()));
                 let char_indices: Vec<usize> = word.char_indices().map(|x| x.0).collect();
@@ -190,8 +211,24 @@ impl Jieba {
             }
             buf.clear();
         }
-        self.total = total;
+        self.total += total;
         Ok(())
+    }
+
+    fn get_word_freq(&self, word: &str, default: usize) -> usize {
+        match self.dict.get(word) {
+            Some(e) => match e {
+                &(freq, _) => freq
+            },
+            _ => default
+        }
+    }
+
+    /// Suggest word frequency to force the characters in a word to be joined or splitted.
+    pub fn suggest_freq(&self, segment: &str) -> usize {
+        let logtotal = (self.total as f64).ln();
+        let logfreq = self.cut(segment, false).iter().fold(0f64, |freq, word| freq + (self.get_word_freq(word, 1) as f64).ln() - logtotal);
+        std::cmp::max((logfreq + logtotal).exp() as usize + 1, self.get_word_freq(segment, 1))
     }
 
     fn calc(&self, sentence: &str, char_indices: &[usize], dag: &DAG) -> Vec<(f64, usize)> {
@@ -665,6 +702,7 @@ impl Jieba {
 
 #[cfg(test)]
 mod tests {
+    use std::io::BufReader;
     use smallvec::SmallVec;
     use super::{Jieba, Token, TokenizeMode, Tag};
 
@@ -835,5 +873,85 @@ mod tests {
                 Token { word: "叛徒", start: 7, end: 9 }
             ]
         );
+    }
+
+    #[test]
+    fn test_userdict() {
+        let mut jieba = Jieba::new();
+        let tokens = jieba.tokenize("我们中出了一个叛徒", TokenizeMode::Default, false);
+        assert_eq!(
+            tokens,
+            vec![
+                Token { word: "我们", start: 0, end: 2 },
+                Token { word: "中", start: 2, end: 3 },
+                Token { word: "出", start: 3, end: 4 },
+                Token { word: "了", start: 4, end: 5 },
+                Token { word: "一个", start: 5, end: 7 },
+                Token { word: "叛徒", start: 7, end: 9 }
+            ]
+        );
+        let userdict = "中出 10000";
+        jieba.load_dict(&mut BufReader::new(userdict.as_bytes())).unwrap();
+        let tokens = jieba.tokenize("我们中出了一个叛徒", TokenizeMode::Default, false);
+        assert_eq!(
+            tokens,
+            vec![
+                Token { word: "我们", start: 0, end: 2 },
+                Token { word: "中出", start: 2, end: 4 },
+                Token { word: "了", start: 4, end: 5 },
+                Token { word: "一个", start: 5, end: 7 },
+                Token { word: "叛徒", start: 7, end: 9 }
+            ]
+        );
+    }
+
+    #[test]
+    fn test_userdict_hmm() {
+        let mut jieba = Jieba::new();
+        let tokens = jieba.tokenize("我们中出了一个叛徒", TokenizeMode::Default, true);
+        assert_eq!(
+            tokens,
+            vec![
+                Token { word: "我们", start: 0, end: 2 },
+                Token { word: "中出", start: 2, end: 4 },
+                Token { word: "了", start: 4, end: 5 },
+                Token { word: "一个", start: 5, end: 7 },
+                Token { word: "叛徒", start: 7, end: 9 }
+            ]
+        );
+        let userdict = "出了 10000";
+        jieba.load_dict(&mut BufReader::new(userdict.as_bytes())).unwrap();
+        let tokens = jieba.tokenize("我们中出了一个叛徒", TokenizeMode::Default, true);
+        assert_eq!(
+            tokens,
+            vec![
+                Token { word: "我们", start: 0, end: 2 },
+                Token { word: "中", start: 2, end: 3 },
+                Token { word: "出了", start: 3, end: 5 },
+                Token { word: "一个", start: 5, end: 7 },
+                Token { word: "叛徒", start: 7, end: 9 }
+            ]
+        );
+    }
+
+    #[test]
+    fn test_suggest_freq() {
+        // NOTE: Following behaviors are aligned with original Jieba
+
+        let mut jieba = Jieba::new();
+        // These values were calculated by original Jieba
+        assert_eq!(jieba.suggest_freq("中出"), 348);
+        assert_eq!(jieba.suggest_freq("出了"), 1263);
+
+        // Freq in dict.txt was 3, which became 300 after loading user dict
+        let userdict = "中出 300";
+        jieba.load_dict(&mut BufReader::new(userdict.as_bytes())).unwrap();
+        // But it's less than calculated freq 348
+        assert_eq!(jieba.suggest_freq("中出"), 348);
+
+        let userdict = "中出 500";
+        jieba.load_dict(&mut BufReader::new(userdict.as_bytes())).unwrap();
+        // Now it's significant enough
+        assert_eq!(jieba.suggest_freq("中出"), 500)
     }
 }
