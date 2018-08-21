@@ -5,6 +5,9 @@ addons:
   apt:
     packages:
       - libssl-dev
+      - pkg-config
+      - cmake
+      - zlib1g-dev
 rust:
   - stable
   - beta
@@ -17,7 +20,7 @@ script:
 after_success:
   - |
     if [[ "$TRAVIS_OS_NAME" == "linux" && "$TRAVIS_RUST_VERSION" == "nightly" ]]; then
-      bash <(curl https://raw.githubusercontent.com/xd009642/tarpaulin/master/travis-install.sh)
+      RUSTFLAGS="--cfg procmacro2_semver_exempt" cargo install cargo-tarpaulin
       cargo tarpaulin --out Xml
       bash <(curl -s https://codecov.io/bash)
     fi
