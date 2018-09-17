@@ -158,12 +158,17 @@ impl Default for Jieba {
 }
 
 impl Jieba {
+    /// Create a new instance with empty dict
+    pub fn empty() -> Self {
+        Jieba {
+            dict: FxHashMap::default(),
+            total: 0,
+        }
+    }
+
     /// Create a new instance with embed dict
     pub fn new() -> Self {
-        let mut instance = Jieba {
-            dict: FxHashMap::default(),
-            total: 0
-        };
+        let mut instance = Self::empty();
         let mut default_dict = BufReader::new(DEFAULT_DICT.as_bytes());
         instance.load_dict(&mut default_dict).unwrap();
         instance
@@ -171,10 +176,7 @@ impl Jieba {
 
     /// Create a new instance with dict
     pub fn with_dict<R: BufRead>(dict: &mut R) -> io::Result<Self> {
-        let mut instance = Jieba {
-            dict: FxHashMap::default(),
-            total: 0
-        };
+        let mut instance = Self::empty();
         instance.load_dict(dict)?;
         Ok(instance)
     }
