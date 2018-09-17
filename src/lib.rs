@@ -65,7 +65,7 @@ impl<'r, 't> SplitCaptures<'r, 't> {
     fn new(re: &'r Regex, text: &'t str) -> SplitCaptures<'r, 't> {
         SplitCaptures {
             finder: re.captures_iter(text),
-            text: text,
+            text,
             last: 0,
             caps: None,
         }
@@ -615,8 +615,8 @@ impl Jieba {
                 for word in words {
                     let width = word.chars().count();
                     tokens.push(Token {
-                        word: word,
-                        start: start,
+                        word,
+                        start,
                         end: start + width,
                     });
                     start += width;
@@ -661,8 +661,8 @@ impl Jieba {
                         }
                     }
                     tokens.push(Token {
-                        word: word,
-                        start: start,
+                        word,
+                        start,
                         end: start + width,
                     });
                     start += width;
