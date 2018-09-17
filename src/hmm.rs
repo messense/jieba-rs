@@ -122,7 +122,7 @@ pub fn cut(sentence: &str) -> Vec<&str> {
     let mut words = Vec::new();
     let splitter = SplitCaptures::new(&RE_HAN, sentence);
     for state in splitter {
-        let block = state.as_str();
+        let block = state.into_str();
         if block.is_empty() {
             continue;
         }
@@ -136,7 +136,7 @@ pub fn cut(sentence: &str) -> Vec<&str> {
         } else {
             let skip_splitter = SplitCaptures::new(&RE_SKIP, block);
             for skip_state in skip_splitter {
-                let x = skip_state.as_str();
+                let x = skip_state.into_str();
                 if x.is_empty() {
                     continue;
                 }

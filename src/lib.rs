@@ -80,7 +80,7 @@ pub(crate) enum SplitState<'t> {
 
 impl<'t> SplitState<'t> {
     #[inline]
-    fn as_str(self) -> &'t str {
+    fn into_str(self) -> &'t str {
         match self {
             SplitState::Unmatched(t) => t,
             SplitState::Captured(caps) => caps.get(0).unwrap().as_str(),
@@ -474,7 +474,7 @@ impl Jieba {
         let re_skip: &Regex = if cut_all { &*RE_SKIP_CUT_ALL } else { &*RE_SKIP_DEAFULT };
         let splitter = SplitCaptures::new(&re_han, sentence);
         for state in splitter {
-            let block = state.as_str();
+            let block = state.into_str();
             if block.is_empty() {
                 continue;
             }
@@ -491,7 +491,7 @@ impl Jieba {
             } else {
                 let skip_splitter = SplitCaptures::new(&re_skip, block);
                 for skip_state in skip_splitter {
-                    let word = skip_state.as_str();
+                    let word = skip_state.into_str();
                     if word.is_empty() {
                         continue;
                     }
