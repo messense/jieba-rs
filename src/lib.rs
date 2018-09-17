@@ -180,40 +180,54 @@ impl Jieba {
         instance.load_dict(dict)?;
         Ok(instance)
     }
+    /// Add word to dict, return `freq`
+    ///
+    /// `freq`: if `None`, will be given by [suggest_freq](#method.suggest_freq)
+    ///
+    /// `tag`: if `None`, will be given `""`
+    pub fn add_word_to_dict(
+        &mut self,
+        word: &str,
+        freq: Option<usize>,
+        tag: Option<&str>,
+    ) -> usize {
+        let freq = freq.unwrap_or_else(|| self.suggest_freq(word));
+        let tag = tag.unwrap_or("");
+
+        self.dict.insert(word.to_string(), (freq, tag.to_string()));
+        let char_indices = word.char_indices().map(|x| x.0).collect::<Vec<_>>();
+        for i in 1..char_indices.len() {
+            let index = char_indices[i];
+            let wfrag = &word[0..index];
+            self.dict
+                .entry(wfrag.to_string())
+                .or_insert((0, "".to_string()));
+        }
+
+        self.total += freq;
+
+        freq
+    }
 
     /// Load dictionary
     pub fn load_dict<R: BufRead>(&mut self, dict: &mut R) -> io::Result<()> {
         let mut buf = String::new();
-        let mut total = 0;
         while dict.read_line(&mut buf)? > 0 {
             {
-                // Skip empty lines
-                let line = buf.trim();
-                if line.is_empty() { continue; }
-                let parts: Vec<&str> = line.split(' ').collect();
-                let word = parts[0];
-                let freq: usize = if parts.len() > 1 {
-                    parts[1].parse().unwrap()
-                } else {
-                    self.suggest_freq(word)
-                };
-                let tag = if parts.len() > 2 {
-                    parts[2]
-                } else {
-                    ""
-                };
-                total += freq;
-                self.dict.insert(word.to_string(), (freq, tag.to_string()));
-                let char_indices: Vec<usize> = word.char_indices().map(|x| x.0).collect();
-                for i in 1..char_indices.len() {
-                    let index = char_indices[i];
-                    let wfrag = &word[0..index];
-                    self.dict.entry(wfrag.to_string()).or_insert((0, "".to_string()));
+                let parts: Vec<&str> = buf.trim().split_whitespace().collect();
+                if parts.is_empty() {
+                    // Skip empty lines
+                    continue;
                 }
+
+                let word = parts[0];
+                let freq = parts.get(1).map(|x| x.parse::<usize>().unwrap());
+                let tag = parts.get(2).map(|x| *x);
+
+                self.add_word_to_dict(word, freq, tag);
             }
             buf.clear();
         }
-        self.total += total;
         Ok(())
     }
 
