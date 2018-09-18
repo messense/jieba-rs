@@ -185,7 +185,7 @@ impl Jieba {
     /// `freq`: if `None`, will be given by [suggest_freq](#method.suggest_freq)
     ///
     /// `tag`: if `None`, will be given `""`
-    pub fn add_word_to_dict(
+    pub fn add_word(
         &mut self,
         word: &str,
         freq: Option<usize>,
@@ -224,7 +224,7 @@ impl Jieba {
                 let freq = parts.get(1).map(|x| x.parse::<usize>().unwrap());
                 let tag = parts.get(2).map(|x| *x);
 
-                self.add_word_to_dict(word, freq, tag);
+                self.add_word(word, freq, tag);
             }
             buf.clear();
         }
