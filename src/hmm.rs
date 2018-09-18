@@ -79,7 +79,7 @@ fn viterbi(sentence: &str, char_indices: &[usize]) -> Vec<Status> {
     best_path
 }
 
-fn cut_internal<'a>(sentence: &'a str, char_indices: Vec<usize>) -> Vec<&'a str> {
+fn cut_internal(sentence: &str, char_indices: Vec<usize>) -> Vec<&str> {
     let path = viterbi(sentence, &char_indices);
     let mut begin = 0;
     let mut next_i = 0;
@@ -118,11 +118,11 @@ fn cut_internal<'a>(sentence: &'a str, char_indices: Vec<usize>) -> Vec<&'a str>
     words
 }
 
-pub fn cut<'a>(sentence: &'a str) -> Vec<&'a str> {
+pub fn cut(sentence: &str) -> Vec<&str> {
     let mut words = Vec::new();
     let splitter = SplitCaptures::new(&RE_HAN, sentence);
     for state in splitter {
-        let block = state.as_str();
+        let block = state.into_str();
         if block.is_empty() {
             continue;
         }
@@ -136,7 +136,7 @@ pub fn cut<'a>(sentence: &'a str) -> Vec<&'a str> {
         } else {
             let skip_splitter = SplitCaptures::new(&RE_SKIP, block);
             for skip_state in skip_splitter {
-                let x = skip_state.as_str();
+                let x = skip_state.into_str();
                 if x.is_empty() {
                     continue;
                 }
