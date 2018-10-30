@@ -30,7 +30,7 @@ extern crate regex;
 #[macro_use]
 extern crate lazy_static;
 extern crate phf;
-extern crate fxhash;
+extern crate hashbrown;
 
 use std::io::{self, BufRead, BufReader};
 use std::collections::BTreeMap;
@@ -38,7 +38,6 @@ use std::cmp::Ordering;
 
 use regex::{Regex, Captures, CaptureMatches};
 use smallvec::SmallVec;
-use fxhash::FxHashMap;
 
 mod hmm;
 
@@ -147,7 +146,7 @@ pub struct Tag<'a> {
 /// Jieba segmentation
 #[derive(Debug)]
 pub struct Jieba {
-    dict: FxHashMap<String, (usize, String)>,
+    dict: hashbrown::HashMap<String, (usize, String)>,
     total: usize
 }
 
@@ -161,7 +160,7 @@ impl Jieba {
     /// Create a new instance with empty dict
     pub fn empty() -> Self {
         Jieba {
-            dict: FxHashMap::default(),
+            dict: hashbrown::HashMap::new(),
             total: 0,
         }
     }
