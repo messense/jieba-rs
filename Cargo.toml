@@ -8,6 +8,7 @@ keywords = ["nlp", "chinese", "segmenation"]
 license = "MIT"
 readme = "README.md"
 repository = "https://github.com/messense/jieba-rs"
+edition = '2018'
 
 [dependencies]
 smallvec = "0.6"

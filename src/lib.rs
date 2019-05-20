@@ -14,8 +14,6 @@
 //! ## Example
 //!
 //! ```rust
-//! extern crate jieba_rs;
-//!
 //! use jieba_rs::Jieba;
 //!
 //! fn main() {
@@ -25,12 +23,8 @@
 //! }
 //! ```
 //!
-extern crate smallvec;
-extern crate regex;
-#[macro_use]
-extern crate lazy_static;
-extern crate phf;
-extern crate hashbrown;
+
+use lazy_static::lazy_static;
 
 use std::io::{self, BufRead, BufReader};
 use std::collections::BTreeMap;

@@ -1,9 +1,11 @@
+use lazy_static::lazy_static;
+
 use std::cmp::Ordering;
 
 use phf;
 use regex::Regex;
 
-use {SplitCaptures};
+use crate::SplitCaptures;
 
 lazy_static! {
     static ref RE_HAN: Regex = Regex::new(r"([\u{4E00}-\u{9FD5}]+)").unwrap();
