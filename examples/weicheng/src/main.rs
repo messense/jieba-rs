@@ -1,5 +1,3 @@
-extern crate jieba_rs;
-
 use std::time;
 use jieba_rs::Jieba;
 

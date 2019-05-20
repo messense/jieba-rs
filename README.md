@@ -16,13 +16,11 @@ Add it to your ``Cargo.toml``:
 jieba-rs = "0.2"
 ```
 
-Add ``extern crate jieba_rs`` to your crate root and your're good to go!
+then you are good to go. If you are using Rust 2015 you have to ``extern crate jieba_rs`` to your crate root as well. 
 
 ## Example
 
 ```rust
-extern crate jieba_rs;
-
 use jieba_rs::Jieba;
 
 fn main() {
