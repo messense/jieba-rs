@@ -5,7 +5,7 @@ use std::cmp::Ordering;
 use phf;
 use regex::Regex;
 
-use crate::SplitCaptures;
+use crate::SplitMatches;
 
 lazy_static! {
     static ref RE_HAN: Regex = Regex::new(r"([\u{4E00}-\u{9FD5}]+)").unwrap();
@@ -122,7 +122,7 @@ fn cut_internal(sentence: &str, char_indices: Vec<usize>) -> Vec<&str> {
 
 pub fn cut(sentence: &str) -> Vec<&str> {
     let mut words = Vec::new();
-    let splitter = SplitCaptures::new(&RE_HAN, sentence);
+    let splitter = SplitMatches::new(&RE_HAN, sentence);
     for state in splitter {
         let block = state.into_str();
         if block.is_empty() {
@@ -136,7 +136,7 @@ pub fn cut(sentence: &str) -> Vec<&str> {
                 words.push(block);
             }
         } else {
-            let skip_splitter = SplitCaptures::new(&RE_SKIP, block);
+            let skip_splitter = SplitMatches::new(&RE_SKIP, block);
             for skip_state in skip_splitter {
                 let x = skip_state.into_str();
                 if x.is_empty() {

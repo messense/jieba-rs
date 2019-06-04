@@ -46,17 +46,17 @@ lazy_static! {
     static ref RE_SKIP_CUT_ALL: Regex = Regex::new(r"[^a-zA-Z0-9+#\n]").unwrap();
 }
 
-struct SplitCaptures<'r, 't> {
+struct SplitMatches<'r, 't> {
     finder: Matches<'r, 't>,
     text: &'t str,
     last: usize,
     matched: Option<Match<'t>>,
 }
 
-impl<'r, 't> SplitCaptures<'r, 't> {
+impl<'r, 't> SplitMatches<'r, 't> {
     #[inline]
-    fn new(re: &'r Regex, text: &'t str) -> SplitCaptures<'r, 't> {
-        SplitCaptures {
+    fn new(re: &'r Regex, text: &'t str) -> SplitMatches<'r, 't> {
+        SplitMatches {
             finder: re.find_iter(text),
             text,
             last: 0,
@@ -81,7 +81,7 @@ impl<'t> SplitState<'t> {
     }
 }
 
-impl<'r, 't> Iterator for SplitCaptures<'r, 't> {
+impl<'r, 't> Iterator for SplitMatches<'r, 't> {
     type Item = SplitState<'t>;
 
     fn next(&mut self) -> Option<SplitState<'t>> {
@@ -480,7 +480,7 @@ impl Jieba {
         let mut words = Vec::new();
         let re_han: &Regex = if cut_all { &*RE_HAN_CUT_ALL } else { &*RE_HAN_DEFAULT };
         let re_skip: &Regex = if cut_all { &*RE_SKIP_CUT_ALL } else { &*RE_SKIP_DEAFULT };
-        let splitter = SplitCaptures::new(&re_han, sentence);
+        let splitter = SplitMatches::new(&re_han, sentence);
         for state in splitter {
             let block = state.into_str();
             if block.is_empty() {
@@ -497,7 +497,7 @@ impl Jieba {
                     }
                 }
             } else {
-                let skip_splitter = SplitCaptures::new(&re_skip, block);
+                let skip_splitter = SplitMatches::new(&re_skip, block);
                 for skip_state in skip_splitter {
                     let word = skip_state.into_str();
                     if word.is_empty() {
