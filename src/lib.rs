@@ -30,7 +30,7 @@ use std::io::{self, BufRead, BufReader};
 use std::collections::BTreeMap;
 use std::cmp::Ordering;
 
-use regex::{Regex, Captures, CaptureMatches};
+use regex::{Regex, Match, Matches};
 use smallvec::SmallVec;
 
 mod hmm;
@@ -47,20 +47,20 @@ lazy_static! {
 }
 
 struct SplitCaptures<'r, 't> {
-    finder: CaptureMatches<'r, 't>,
+    finder: Matches<'r, 't>,
     text: &'t str,
     last: usize,
-    caps: Option<Captures<'t>>,
+    matched: Option<Match<'t>>,
 }
 
 impl<'r, 't> SplitCaptures<'r, 't> {
     #[inline]
     fn new(re: &'r Regex, text: &'t str) -> SplitCaptures<'r, 't> {
         SplitCaptures {
-            finder: re.captures_iter(text),
+            finder: re.find_iter(text),
             text,
             last: 0,
-            caps: None,
+            matched: None,
         }
     }
 }
@@ -68,7 +68,7 @@ impl<'r, 't> SplitCaptures<'r, 't> {
 #[derive(Debug)]
 pub(crate) enum SplitState<'t> {
     Unmatched(&'t str),
-    Captured(Captures<'t>),
+    Matched(Match<'t>),
 }
 
 impl<'t> SplitState<'t> {
@@ -76,7 +76,7 @@ impl<'t> SplitState<'t> {
     fn into_str(self) -> &'t str {
         match self {
             SplitState::Unmatched(t) => t,
-            SplitState::Captured(caps) => caps.get(0).unwrap().as_str(),
+            SplitState::Matched(matched) => matched.as_str(),
         }
     }
 }
@@ -85,8 +85,8 @@ impl<'r, 't> Iterator for SplitCaptures<'r, 't> {
     type Item = SplitState<'t>;
 
     fn next(&mut self) -> Option<SplitState<'t>> {
-        if let Some(caps) = self.caps.take() {
-            return Some(SplitState::Captured(caps));
+        if let Some(matched) = self.matched.take() {
+            return Some(SplitState::Matched(matched));
         }
         match self.finder.next() {
             None => {
@@ -98,11 +98,10 @@ impl<'r, 't> Iterator for SplitCaptures<'r, 't> {
                     Some(SplitState::Unmatched(s))
                 }
             }
-            Some(caps) => {
-                let m = caps.get(0).unwrap();
+            Some(m) => {
                 let unmatched = &self.text[self.last..m.start()];
                 self.last = m.end();
-                self.caps = Some(caps);
+                self.matched = Some(m);
                 Some(SplitState::Unmatched(unmatched))
             }
         }
