@@ -39,15 +39,15 @@ fn viterbi(sentence: &str, char_indices: &[usize]) -> Vec<Status> {
     let states = [Status::B, Status::M, Status::E, Status::S];
     #[allow(non_snake_case)]
     let mut V = vec![vec![0.0; states.len()]; char_indices.len()];
-    let mut path = vec![vec![Status::B; char_indices.len()]; states.len()];
+    let mut prev: Vec<Vec<Option<Status>>> = vec![vec![None; char_indices.len()]; states.len()];
+
     for y in &states {
         let first_word = &sentence[char_indices[0]..char_indices[1]];
         let prob = INITIAL_PROBS[*y as usize] + EMIT_PROBS[*y as usize].get(first_word).cloned().unwrap_or(MIN_FLOAT);
         V[0][*y as usize] = prob;
-        path[*y as usize][0] = *y;
     }
+
     for t in 1..char_indices.len() {
-        let mut new_path = vec![vec![Status::B; char_indices.len()]; states.len()];
         for y in &states {
             let byte_start = char_indices[t];
             let byte_end = if t + 1 < char_indices.len() {
@@ -65,11 +65,8 @@ fn viterbi(sentence: &str, char_indices: &[usize]) -> Vec<Status> {
                 .max_by(|x, y| x.partial_cmp(y).unwrap_or(Ordering::Equal))
                 .unwrap();
             V[t][*y as usize] = prob;
-            let mut prev_path = path[state as usize].clone();
-            prev_path[t] = *y;
-            new_path[*y as usize] = prev_path;
+            prev[*y as usize][t] = Some(state);
         }
-        path = new_path;
     }
     let (_prob, state) = [Status::E, Status::S]
         .iter().map(|y| {
@@ -77,7 +74,19 @@ fn viterbi(sentence: &str, char_indices: &[usize]) -> Vec<Status> {
         })
         .max_by(|x, y| x.partial_cmp(y).unwrap_or(Ordering::Equal))
         .unwrap();
-    let best_path: Vec<Status> = path[*state as usize].iter().map(|x| *x).collect();
+
+    let mut best_path: Vec<Status> = vec![Status::B; char_indices.len()];
+    let mut t: usize = char_indices.len()-1;
+    let mut curr = *state;
+
+    best_path[t] = *state;
+    while let Some(p) = prev[curr as usize][t] {
+        assert!(t > 0);
+        best_path[t-1] = p;
+        curr = p;
+        t = t-1;
+    }
+
     best_path
 }
 
