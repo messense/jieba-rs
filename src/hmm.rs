@@ -76,15 +76,15 @@ fn viterbi(sentence: &str, char_indices: &[usize]) -> Vec<Status> {
         .unwrap();
 
     let mut best_path: Vec<Status> = vec![Status::B; char_indices.len()];
-    let mut t: usize = char_indices.len()-1;
+    let mut t = char_indices.len() - 1;
     let mut curr = *state;
 
     best_path[t] = *state;
     while let Some(p) = prev[curr as usize][t] {
         assert!(t > 0);
-        best_path[t-1] = p;
+        best_path[t - 1] = p;
         curr = p;
-        t = t-1;
+        t = t - 1;
     }
 
     best_path
