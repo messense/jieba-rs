@@ -714,13 +714,31 @@ impl Jieba {
 
 #[cfg(test)]
 mod tests {
-    use super::{Jieba, Tag, Token, TokenizeMode};
+    use super::{Jieba, Tag, Token, TokenizeMode, SplitMatches, SplitState, RE_HAN_DEFAULT};
     use smallvec::SmallVec;
     use std::io::BufReader;
 
     #[test]
     fn test_init_with_default_dict() {
         let _ = Jieba::new();
+    }
+
+    #[test]
+    fn test_split_matches() {
+        let re_han = &*RE_HAN_DEFAULT;
+        let splitter = SplitMatches::new(&re_han, "👪 PS: 我觉得开源有一个好处，就是能够敦促自己不断改进 👪，避免敞帚自珍");
+        for state in splitter {
+            match state {
+                SplitState::Matched(_) => {
+                    let block = state.into_str();
+                    assert_eq!(block.is_empty(), false);
+                },
+                SplitState::Unmatched(_) => {
+                    let block = state.into_str();
+                    assert_eq!(block.is_empty(), false);
+                }
+            }
+        }
     }
 
     #[test]
