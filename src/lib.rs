@@ -98,10 +98,15 @@ impl<'r, 't> Iterator for SplitMatches<'r, 't> {
                 }
             },
             Some(m) => {
-                let unmatched = &self.text[self.last..m.start()];
-                self.last = m.end();
-                self.matched = Some(m);
-                Some(SplitState::Unmatched(unmatched))
+                if self.last == m.start() {
+                    self.last = m.end();
+                    Some(SplitState::Matched(m))
+                } else {
+                    let unmatched = &self.text[self.last..m.start()];
+                    self.last = m.end();
+                    self.matched = Some(m);
+                    Some(SplitState::Unmatched(unmatched))
+                }
             },
         }
     }
@@ -479,44 +484,49 @@ impl Jieba {
         let re_skip: &Regex = if cut_all { &*RE_SKIP_CUT_ALL } else { &*RE_SKIP_DEAFULT };
         let splitter = SplitMatches::new(&re_han, sentence);
         for state in splitter {
-            let block = state.into_str();
-            if block.is_empty() {
-                continue;
-            }
-            if re_han.is_match(block) {
-                if cut_all {
-                    words.extend(self.cut_all_internal(block));
-                } else {
-                    if hmm {
-                        words.extend(self.cut_dag_hmm(block));
+            match state {
+                SplitState::Matched(_) => {
+                    let block = state.into_str();
+                    assert!(!block.is_empty());
+
+                    if cut_all {
+                        words.extend(self.cut_all_internal(block));
                     } else {
-                        words.extend(self.cut_dag_no_hmm(block));
+                        if hmm {
+                            words.extend(self.cut_dag_hmm(block));
+                        } else {
+                            words.extend(self.cut_dag_no_hmm(block));
+                        }
                     }
-                }
-            } else {
-                let skip_splitter = SplitMatches::new(&re_skip, block);
-                for skip_state in skip_splitter {
-                    let word = skip_state.into_str();
-                    if word.is_empty() {
-                        continue;
-                    }
-                    if cut_all || re_skip.is_match(word) {
-                        words.push(word);
-                    } else {
-                        let mut word_indices = word.char_indices().map(|x| x.0).peekable();
-                        loop {
-                            if let Some(byte_start) = word_indices.next() {
-                                if let Some(byte_end) = word_indices.peek() {
-                                    words.push(&word[byte_start..*byte_end]);
+                },
+                SplitState::Unmatched(_) => {
+                    let block = state.into_str();
+                    assert!(!block.is_empty());
+
+                    let skip_splitter = SplitMatches::new(&re_skip, block);
+                    for skip_state in skip_splitter {
+                        let word = skip_state.into_str();
+                        if word.is_empty() {
+                            continue;
+                        }
+                        if cut_all || re_skip.is_match(word) {
+                            words.push(word);
+                        } else {
+                            let mut word_indices = word.char_indices().map(|x| x.0).peekable();
+                            loop {
+                                if let Some(byte_start) = word_indices.next() {
+                                    if let Some(byte_end) = word_indices.peek() {
+                                        words.push(&word[byte_start..*byte_end]);
+                                    } else {
+                                        words.push(&word[byte_start..]);
+                                    }
                                 } else {
-                                    words.push(&word[byte_start..]);
+                                    break;
                                 }
-                            } else {
-                                break;
                             }
                         }
                     }
-                }
+                },
             }
         }
         words
