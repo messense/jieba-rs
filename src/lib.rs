@@ -714,7 +714,7 @@ impl Jieba {
 
 #[cfg(test)]
 mod tests {
-    use super::{Jieba, Tag, Token, TokenizeMode, SplitMatches, SplitState, RE_HAN_DEFAULT};
+    use super::{Jieba, SplitMatches, SplitState, Tag, Token, TokenizeMode, RE_HAN_DEFAULT};
     use smallvec::SmallVec;
     use std::io::BufReader;
 
@@ -726,7 +726,10 @@ mod tests {
     #[test]
     fn test_split_matches() {
         let re_han = &*RE_HAN_DEFAULT;
-        let splitter = SplitMatches::new(&re_han, "👪 PS: 我觉得开源有一个好处，就是能够敦促自己不断改进 👪，避免敞帚自珍");
+        let splitter = SplitMatches::new(
+            &re_han,
+            "👪 PS: 我觉得开源有一个好处，就是能够敦促自己不断改进 👪，避免敞帚自珍",
+        );
         for state in splitter {
             match state {
                 SplitState::Matched(_) => {
@@ -736,7 +739,7 @@ mod tests {
                 SplitState::Unmatched(_) => {
                     let block = state.into_str();
                     assert_eq!(block.is_empty(), false);
-                }
+                },
             }
         }
     }
