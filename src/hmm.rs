@@ -112,7 +112,7 @@ fn cut_internal(sentence: &str, char_indices: Vec<usize>) -> Vec<&str> {
                 };
                 words.push(&sentence[byte_start..byte_end]);
                 next_i = i + 1;
-            },
+            }
             Status::S => {
                 let byte_start = char_indices[i];
                 let byte_end = if i + 1 < char_indices.len() {
@@ -122,8 +122,8 @@ fn cut_internal(sentence: &str, char_indices: Vec<usize>) -> Vec<&str> {
                 };
                 words.push(&sentence[byte_start..byte_end]);
                 next_i = i + 1;
-            },
-            Status::M => { /* do nothing */ },
+            }
+            Status::M => { /* do nothing */ }
         }
     }
     if next_i < char_indices.len() {
