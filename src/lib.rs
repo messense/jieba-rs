@@ -96,7 +96,7 @@ impl<'r, 't> Iterator for SplitMatches<'r, 't> {
                     self.last = self.text.len();
                     Some(SplitState::Unmatched(s))
                 }
-            },
+            }
             Some(m) => {
                 if self.last == m.start() {
                     self.last = m.end();
@@ -107,7 +107,7 @@ impl<'r, 't> Iterator for SplitMatches<'r, 't> {
                     self.matched = Some(m);
                     Some(SplitState::Unmatched(unmatched))
                 }
-            },
+            }
         }
     }
 }
@@ -498,7 +498,7 @@ impl Jieba {
                             words.extend(self.cut_dag_no_hmm(block));
                         }
                     }
-                },
+                }
                 SplitState::Unmatched(_) => {
                     let block = state.into_str();
                     assert!(!block.is_empty());
@@ -526,7 +526,7 @@ impl Jieba {
                             }
                         }
                     }
-                },
+                }
             }
         }
         words
@@ -620,7 +620,7 @@ impl Jieba {
                     });
                     start += width;
                 }
-            },
+            }
             TokenizeMode::Search => {
                 for word in words {
                     let width = word.chars().count();
@@ -666,7 +666,7 @@ impl Jieba {
                     });
                     start += width;
                 }
-            },
+            }
         }
         tokens
     }
@@ -735,11 +735,11 @@ mod tests {
                 SplitState::Matched(_) => {
                     let block = state.into_str();
                     assert_eq!(block.is_empty(), false);
-                },
+                }
                 SplitState::Unmatched(_) => {
                     let block = state.into_str();
                     assert_eq!(block.is_empty(), false);
-                },
+                }
             }
         }
     }
