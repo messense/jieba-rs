@@ -2,7 +2,7 @@ extern crate phf_codegen;
 
 use std::env;
 use std::fs::File;
-use std::io::{BufWriter, Write, BufRead, BufReader};
+use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::path::Path;
 
 fn main() {
@@ -18,7 +18,11 @@ fn main() {
     }
     write!(&mut file, "];\n\n").unwrap();
     write!(&mut file, "static TRANS_PROBS: [StatusSet; 4] = [").unwrap();
-    for line in lines.by_ref().skip_while(|x| x.starts_with("#")).take_while(|x| !x.starts_with("#")) {
+    for line in lines
+        .by_ref()
+        .skip_while(|x| x.starts_with("#"))
+        .take_while(|x| !x.starts_with("#"))
+    {
         write!(&mut file, "[").unwrap();
         for prob in line.split(' ') {
             write!(&mut file, "{}, ", prob).unwrap();
@@ -31,7 +35,7 @@ fn main() {
         if line.starts_with("#") {
             continue;
         }
-         write!(&mut file, "static EMIT_PROB_{}: phf::Map<&'static str, f64> = ", i).unwrap();
+        write!(&mut file, "static EMIT_PROB_{}: phf::Map<&'static str, f64> = ", i).unwrap();
         let mut map = phf_codegen::Map::new();
         for word_prob in line.split(',') {
             let mut parts = word_prob.split(':');
@@ -39,9 +43,9 @@ fn main() {
             let prob = parts.next().unwrap();
             map.entry(word.to_string(), prob);
         }
-         map.build(&mut file).unwrap();
-         write!(&mut file, ";\n").unwrap();
-         i += 1;
+        map.build(&mut file).unwrap();
+        write!(&mut file, ";\n").unwrap();
+        i += 1;
     }
     write!(&mut file, "static EMIT_PROBS: [&'static phf::Map<&'static str, f64>; 4] = [&EMIT_PROB_0, &EMIT_PROB_1, &EMIT_PROB_2, &EMIT_PROB_3];\n").unwrap();
 }

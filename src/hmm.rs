@@ -23,10 +23,10 @@ pub enum Status {
 }
 
 static PREV_STATUS: [[Status; 2]; 4] = [
-    [Status::E, Status::S],  // B
-    [Status::B, Status::M],  // E
-    [Status::M, Status::B],  // M
-    [Status::S, Status::E],  // S
+    [Status::E, Status::S], // B
+    [Status::B, Status::M], // E
+    [Status::M, Status::B], // M
+    [Status::S, Status::E], // S
 ];
 
 include!(concat!(env!("OUT_DIR"), "/hmm_prob.rs"));
@@ -60,7 +60,12 @@ fn viterbi(sentence: &str, char_indices: &[usize]) -> Vec<Status> {
             let (prob, state) = PREV_STATUS[*y as usize]
                 .iter()
                 .map(|y0| {
-                    (V[t - 1][*y0 as usize] + TRANS_PROBS[*y0 as usize].get(*y as usize).cloned().unwrap_or(MIN_FLOAT) + em_prob, *y0)
+                    (
+                        V[t - 1][*y0 as usize]
+                            + TRANS_PROBS[*y0 as usize].get(*y as usize).cloned().unwrap_or(MIN_FLOAT)
+                            + em_prob,
+                        *y0,
+                    )
                 })
                 .max_by(|x, y| x.partial_cmp(y).unwrap_or(Ordering::Equal))
                 .unwrap();
@@ -69,9 +74,8 @@ fn viterbi(sentence: &str, char_indices: &[usize]) -> Vec<Status> {
         }
     }
     let (_prob, state) = [Status::E, Status::S]
-        .iter().map(|y| {
-            (V[char_indices.len() - 1][*y as usize], y)
-        })
+        .iter()
+        .map(|y| (V[char_indices.len() - 1][*y as usize], y))
         .max_by(|x, y| x.partial_cmp(y).unwrap_or(Ordering::Equal))
         .unwrap();
 
@@ -160,7 +164,7 @@ pub fn cut(sentence: &str) -> Vec<&str> {
 
 #[cfg(test)]
 mod tests {
-    use super::{viterbi, cut};
+    use super::{cut, viterbi};
 
     #[test]
     fn test_viterbi() {
@@ -176,6 +180,9 @@ mod tests {
     fn test_hmm_cut() {
         let sentence = "小明硕士毕业于中国科学院计算所";
         let words = cut(sentence);
-        assert_eq!(words, vec!["小明", "硕士", "毕业于", "中国", "科学院", "计算", "所"]);
+        assert_eq!(
+            words,
+            vec!["小明", "硕士", "毕业于", "中国", "科学院", "计算", "所"]
+        );
     }
 }

@@ -22,15 +22,14 @@
 //!     assert_eq!(words, vec!["我们", "中", "出", "了", "一个", "叛徒"]);
 //! }
 //! ```
-//!
 
 use lazy_static::lazy_static;
 
-use std::io::{self, BufRead, BufReader};
-use std::collections::BTreeMap;
 use std::cmp::Ordering;
+use std::collections::BTreeMap;
+use std::io::{self, BufRead, BufReader};
 
-use regex::{Regex, Match, Matches};
+use regex::{Match, Matches, Regex};
 use smallvec::SmallVec;
 
 mod hmm;
@@ -97,13 +96,13 @@ impl<'r, 't> Iterator for SplitMatches<'r, 't> {
                     self.last = self.text.len();
                     Some(SplitState::Unmatched(s))
                 }
-            }
+            },
             Some(m) => {
                 let unmatched = &self.text[self.last..m.start()];
                 self.last = m.end();
                 self.matched = Some(m);
                 Some(SplitState::Unmatched(unmatched))
-            }
+            },
         }
     }
 }
@@ -140,7 +139,7 @@ pub struct Tag<'a> {
 #[derive(Debug)]
 pub struct Jieba {
     dict: hashbrown::HashMap<String, (usize, String)>,
-    total: usize
+    total: usize,
 }
 
 impl Default for Jieba {
@@ -177,12 +176,7 @@ impl Jieba {
     /// `freq`: if `None`, will be given by [suggest_freq](#method.suggest_freq)
     ///
     /// `tag`: if `None`, will be given `""`
-    pub fn add_word(
-        &mut self,
-        word: &str,
-        freq: Option<usize>,
-        tag: Option<&str>,
-    ) -> usize {
+    pub fn add_word(&mut self, word: &str, freq: Option<usize>, tag: Option<&str>) -> usize {
         let freq = freq.unwrap_or_else(|| self.suggest_freq(word));
         let tag = tag.unwrap_or("");
 
@@ -191,9 +185,7 @@ impl Jieba {
         for i in 1..char_indices.len() {
             let index = char_indices[i];
             let wfrag = &word[0..index];
-            self.dict
-                .entry(wfrag.to_string())
-                .or_insert((0, "".to_string()));
+            self.dict.entry(wfrag.to_string()).or_insert((0, "".to_string()));
         }
 
         self.total += freq;
@@ -226,16 +218,18 @@ impl Jieba {
     fn get_word_freq(&self, word: &str, default: usize) -> usize {
         match self.dict.get(word) {
             Some(e) => match e {
-                &(freq, _) => freq
+                &(freq, _) => freq,
             },
-            _ => default
+            _ => default,
         }
     }
 
     /// Suggest word frequency to force the characters in a word to be joined or splitted.
     pub fn suggest_freq(&self, segment: &str) -> usize {
         let logtotal = (self.total as f64).ln();
-        let logfreq = self.cut(segment, false).iter().fold(0f64, |freq, word| freq + (self.get_word_freq(word, 1) as f64).ln() - logtotal);
+        let logfreq = self.cut(segment, false).iter().fold(0f64, |freq, word| {
+            freq + (self.get_word_freq(word, 1) as f64).ln() - logtotal
+        });
         std::cmp::max((logfreq + logtotal).exp() as usize + 1, self.get_word_freq(segment, 1))
     }
 
@@ -247,18 +241,21 @@ impl Jieba {
         }
         let logtotal = (self.total as f64).ln();
         for i in (0..word_count).rev() {
-            let pair = dag[&i].iter().map(|x| {
-                let byte_start = char_indices[i];
-                let end_index = x + 1;
-                let byte_end = if end_index < char_indices.len() {
-                    char_indices[end_index]
-                } else {
-                    sentence.len()
-                };
-                let wfrag = &sentence[byte_start..byte_end];
-                let freq = self.dict.get(wfrag).map(|x| x.0).unwrap_or(1);
-                ((freq as f64).ln() - logtotal + route[x + 1].0, *x)
-            }).max_by(|x, y| x.partial_cmp(y).unwrap_or(Ordering::Equal));
+            let pair = dag[&i]
+                .iter()
+                .map(|x| {
+                    let byte_start = char_indices[i];
+                    let end_index = x + 1;
+                    let byte_end = if end_index < char_indices.len() {
+                        char_indices[end_index]
+                    } else {
+                        sentence.len()
+                    };
+                    let wfrag = &sentence[byte_start..byte_end];
+                    let freq = self.dict.get(wfrag).map(|x| x.0).unwrap_or(1);
+                    ((freq as f64).ln() - logtotal + route[x + 1].0, *x)
+                })
+                .max_by(|x, y| x.partial_cmp(y).unwrap_or(Ordering::Equal));
             route[i] = pair.unwrap();
         }
         route
@@ -613,7 +610,7 @@ impl Jieba {
                     });
                     start += width;
                 }
-            }
+            },
             TokenizeMode::Search => {
                 for word in words {
                     let width = word.chars().count();
@@ -659,7 +656,7 @@ impl Jieba {
                     });
                     start += width;
                 }
-            }
+            },
         }
         tokens
     }
@@ -673,46 +670,43 @@ impl Jieba {
     /// `hmm`: enable HMM or not
     pub fn tag<'a>(&'a self, sentence: &'a str, hmm: bool) -> Vec<Tag<'a>> {
         let words = self.cut(sentence, hmm);
-        let tags = words.into_iter().map(|word| {
-            if let Some(tag) = self.dict.get(word) {
-                if tag.0 != 0 {
-                    return Tag {
-                        word,
-                        tag: &tag.1,
-                    };
-                }
-            }
-            let mut eng = 0;
-            let mut m = 0;
-            for chr in word.chars() {
-                if chr.is_ascii_alphanumeric() {
-                    eng += 1;
-                    if chr.is_ascii_digit() {
-                        m += 1;
+        let tags = words
+            .into_iter()
+            .map(|word| {
+                if let Some(tag) = self.dict.get(word) {
+                    if tag.0 != 0 {
+                        return Tag { word, tag: &tag.1 };
                     }
                 }
-            }
-            let tag = if eng == 0 {
-                "x"
-            } else if eng == m {
-                "m"
-            } else {
-                "eng"
-            };
-            Tag {
-                word,
-                tag,
-            }
-        }).collect();
+                let mut eng = 0;
+                let mut m = 0;
+                for chr in word.chars() {
+                    if chr.is_ascii_alphanumeric() {
+                        eng += 1;
+                        if chr.is_ascii_digit() {
+                            m += 1;
+                        }
+                    }
+                }
+                let tag = if eng == 0 {
+                    "x"
+                } else if eng == m {
+                    "m"
+                } else {
+                    "eng"
+                };
+                Tag { word, tag }
+            })
+            .collect();
         tags
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::io::BufReader;
+    use super::{Jieba, Tag, Token, TokenizeMode};
     use smallvec::SmallVec;
-    use super::{Jieba, Token, TokenizeMode, Tag};
+    use std::io::BufReader;
 
     #[test]
     fn test_init_with_default_dict() {
@@ -736,7 +730,10 @@ mod tests {
     fn test_cut_all() {
         let jieba = Jieba::new();
         let words = jieba.cut_all("abc网球拍卖会def");
-        assert_eq!(words, vec!["abc", "网球", "网球拍", "球拍", "拍卖", "拍卖会", "def"]);
+        assert_eq!(
+            words,
+            vec!["abc", "网球", "网球拍", "球拍", "拍卖", "拍卖会", "def"]
+        );
     }
 
     #[test]
@@ -777,63 +774,141 @@ mod tests {
     fn test_cut_for_search() {
         let jieba = Jieba::new();
         let words = jieba.cut_for_search("南京市长江大桥", true);
-        assert_eq!(words, vec!["南京", "京市", "南京市", "长江", "大桥", "长江大桥"]);
+        assert_eq!(
+            words,
+            vec!["南京", "京市", "南京市", "长江", "大桥", "长江大桥"]
+        );
     }
 
     #[test]
     fn test_tag() {
         let jieba = Jieba::new();
-        let tags = jieba.tag("我是拖拉机学院手扶拖拉机专业的。不用多久，我就会升职加薪，当上CEO，走上人生巅峰。", true);
+        let tags = jieba.tag(
+            "我是拖拉机学院手扶拖拉机专业的。不用多久，我就会升职加薪，当上CEO，走上人生巅峰。",
+            true,
+        );
         assert_eq!(
             tags,
             vec![
                 Tag { word: "我", tag: "r" },
                 Tag { word: "是", tag: "v" },
-                Tag { word: "拖拉机", tag: "n" },
-                Tag { word: "学院", tag: "n" },
-                Tag { word: "手扶拖拉机", tag: "n" },
-                Tag { word: "专业", tag: "n" },
+                Tag {
+                    word: "拖拉机",
+                    tag: "n"
+                },
+                Tag {
+                    word: "学院",
+                    tag: "n"
+                },
+                Tag {
+                    word: "手扶拖拉机",
+                    tag: "n"
+                },
+                Tag {
+                    word: "专业",
+                    tag: "n"
+                },
                 Tag { word: "的", tag: "uj" },
                 Tag { word: "。", tag: "x" },
-                Tag { word: "不用", tag: "v" },
-                Tag { word: "多久", tag: "m" },
+                Tag {
+                    word: "不用",
+                    tag: "v"
+                },
+                Tag {
+                    word: "多久",
+                    tag: "m"
+                },
                 Tag { word: "，", tag: "x" },
                 Tag { word: "我", tag: "r" },
                 Tag { word: "就", tag: "d" },
                 Tag { word: "会", tag: "v" },
-                Tag { word: "升职", tag: "v" },
-                Tag { word: "加薪", tag: "nr" },
+                Tag {
+                    word: "升职",
+                    tag: "v"
+                },
+                Tag {
+                    word: "加薪",
+                    tag: "nr"
+                },
                 Tag { word: "，", tag: "x" },
-                Tag { word: "当上", tag: "t" },
-                Tag { word: "CEO", tag: "eng" },
+                Tag {
+                    word: "当上",
+                    tag: "t"
+                },
+                Tag {
+                    word: "CEO",
+                    tag: "eng"
+                },
                 Tag { word: "，", tag: "x" },
-                Tag { word: "走上", tag: "v" },
-                Tag { word: "人生", tag: "n" },
-                Tag { word: "巅峰", tag: "n" },
+                Tag {
+                    word: "走上",
+                    tag: "v"
+                },
+                Tag {
+                    word: "人生",
+                    tag: "n"
+                },
+                Tag {
+                    word: "巅峰",
+                    tag: "n"
+                },
                 Tag { word: "。", tag: "x" }
             ]
         );
 
-        let tags = jieba.tag("今天纽约的天气真好啊，京华大酒店的张尧经理吃了一只北京烤鸭。", true);
+        let tags = jieba.tag(
+            "今天纽约的天气真好啊，京华大酒店的张尧经理吃了一只北京烤鸭。",
+            true,
+        );
         assert_eq!(
             tags,
             vec![
-                Tag { word: "今天", tag: "t" },
-                Tag { word: "纽约", tag: "ns" },
+                Tag {
+                    word: "今天",
+                    tag: "t"
+                },
+                Tag {
+                    word: "纽约",
+                    tag: "ns"
+                },
                 Tag { word: "的", tag: "uj" },
-                Tag { word: "天气", tag: "n" },
-                Tag { word: "真好", tag: "d" },
+                Tag {
+                    word: "天气",
+                    tag: "n"
+                },
+                Tag {
+                    word: "真好",
+                    tag: "d"
+                },
                 Tag { word: "啊", tag: "zg" },
                 Tag { word: "，", tag: "x" },
-                Tag { word: "京华", tag: "nz" },
-                Tag { word: "大酒店", tag: "n" },
+                Tag {
+                    word: "京华",
+                    tag: "nz"
+                },
+                Tag {
+                    word: "大酒店",
+                    tag: "n"
+                },
                 Tag { word: "的", tag: "uj" },
-                Tag { word: "张尧", tag: "x" },  // XXX: missing in dict
-                Tag { word: "经理", tag: "n" },
+                Tag {
+                    word: "张尧",
+                    tag: "x"
+                }, // XXX: missing in dict
+                Tag {
+                    word: "经理",
+                    tag: "n"
+                },
                 Tag { word: "吃", tag: "v" },
                 Tag { word: "了", tag: "ul" },
-                Tag { word: "一只", tag: "m" },
-                Tag { word: "北京烤鸭", tag: "n" },
+                Tag {
+                    word: "一只",
+                    tag: "m"
+                },
+                Tag {
+                    word: "北京烤鸭",
+                    tag: "n"
+                },
                 Tag { word: "。", tag: "x" }
             ]
         );
@@ -843,18 +918,56 @@ mod tests {
     fn test_tokenize() {
         let jieba = Jieba::new();
         let tokens = jieba.tokenize("南京市长江大桥", TokenizeMode::Default, false);
-        assert_eq!(tokens, vec![Token { word: "南京市", start: 0, end: 3 }, Token { word: "长江大桥", start: 3, end: 7 }]);
+        assert_eq!(
+            tokens,
+            vec![
+                Token {
+                    word: "南京市",
+                    start: 0,
+                    end: 3
+                },
+                Token {
+                    word: "长江大桥",
+                    start: 3,
+                    end: 7
+                }
+            ]
+        );
 
         let tokens = jieba.tokenize("南京市长江大桥", TokenizeMode::Search, false);
         assert_eq!(
             tokens,
             vec![
-                Token { word: "南京", start: 0, end: 2 },
-                Token { word: "京市", start: 1, end: 3 },
-                Token { word: "南京市", start: 0, end: 3 },
-                Token { word: "长江", start: 3, end: 5 },
-                Token { word: "大桥", start: 5, end: 7 },
-                Token { word: "长江大桥", start: 3, end: 7 }
+                Token {
+                    word: "南京",
+                    start: 0,
+                    end: 2
+                },
+                Token {
+                    word: "京市",
+                    start: 1,
+                    end: 3
+                },
+                Token {
+                    word: "南京市",
+                    start: 0,
+                    end: 3
+                },
+                Token {
+                    word: "长江",
+                    start: 3,
+                    end: 5
+                },
+                Token {
+                    word: "大桥",
+                    start: 5,
+                    end: 7
+                },
+                Token {
+                    word: "长江大桥",
+                    start: 3,
+                    end: 7
+                }
             ]
         );
 
@@ -862,23 +975,67 @@ mod tests {
         assert_eq!(
             tokens,
             vec![
-                Token { word: "我们", start: 0, end: 2 },
-                Token { word: "中", start: 2, end: 3 },
-                Token { word: "出", start: 3, end: 4 },
-                Token { word: "了", start: 4, end: 5 },
-                Token { word: "一个", start: 5, end: 7 },
-                Token { word: "叛徒", start: 7, end: 9 }
+                Token {
+                    word: "我们",
+                    start: 0,
+                    end: 2
+                },
+                Token {
+                    word: "中",
+                    start: 2,
+                    end: 3
+                },
+                Token {
+                    word: "出",
+                    start: 3,
+                    end: 4
+                },
+                Token {
+                    word: "了",
+                    start: 4,
+                    end: 5
+                },
+                Token {
+                    word: "一个",
+                    start: 5,
+                    end: 7
+                },
+                Token {
+                    word: "叛徒",
+                    start: 7,
+                    end: 9
+                }
             ]
         );
         let tokens = jieba.tokenize("我们中出了一个叛徒", TokenizeMode::Default, true);
         assert_eq!(
             tokens,
             vec![
-                Token { word: "我们", start: 0, end: 2 },
-                Token { word: "中出", start: 2, end: 4 },
-                Token { word: "了", start: 4, end: 5 },
-                Token { word: "一个", start: 5, end: 7 },
-                Token { word: "叛徒", start: 7, end: 9 }
+                Token {
+                    word: "我们",
+                    start: 0,
+                    end: 2
+                },
+                Token {
+                    word: "中出",
+                    start: 2,
+                    end: 4
+                },
+                Token {
+                    word: "了",
+                    start: 4,
+                    end: 5
+                },
+                Token {
+                    word: "一个",
+                    start: 5,
+                    end: 7
+                },
+                Token {
+                    word: "叛徒",
+                    start: 7,
+                    end: 9
+                }
             ]
         );
     }
@@ -890,12 +1047,36 @@ mod tests {
         assert_eq!(
             tokens,
             vec![
-                Token { word: "我们", start: 0, end: 2 },
-                Token { word: "中", start: 2, end: 3 },
-                Token { word: "出", start: 3, end: 4 },
-                Token { word: "了", start: 4, end: 5 },
-                Token { word: "一个", start: 5, end: 7 },
-                Token { word: "叛徒", start: 7, end: 9 }
+                Token {
+                    word: "我们",
+                    start: 0,
+                    end: 2
+                },
+                Token {
+                    word: "中",
+                    start: 2,
+                    end: 3
+                },
+                Token {
+                    word: "出",
+                    start: 3,
+                    end: 4
+                },
+                Token {
+                    word: "了",
+                    start: 4,
+                    end: 5
+                },
+                Token {
+                    word: "一个",
+                    start: 5,
+                    end: 7
+                },
+                Token {
+                    word: "叛徒",
+                    start: 7,
+                    end: 9
+                }
             ]
         );
         let userdict = "中出 10000";
@@ -904,11 +1085,31 @@ mod tests {
         assert_eq!(
             tokens,
             vec![
-                Token { word: "我们", start: 0, end: 2 },
-                Token { word: "中出", start: 2, end: 4 },
-                Token { word: "了", start: 4, end: 5 },
-                Token { word: "一个", start: 5, end: 7 },
-                Token { word: "叛徒", start: 7, end: 9 }
+                Token {
+                    word: "我们",
+                    start: 0,
+                    end: 2
+                },
+                Token {
+                    word: "中出",
+                    start: 2,
+                    end: 4
+                },
+                Token {
+                    word: "了",
+                    start: 4,
+                    end: 5
+                },
+                Token {
+                    word: "一个",
+                    start: 5,
+                    end: 7
+                },
+                Token {
+                    word: "叛徒",
+                    start: 7,
+                    end: 9
+                }
             ]
         );
     }
@@ -920,11 +1121,31 @@ mod tests {
         assert_eq!(
             tokens,
             vec![
-                Token { word: "我们", start: 0, end: 2 },
-                Token { word: "中出", start: 2, end: 4 },
-                Token { word: "了", start: 4, end: 5 },
-                Token { word: "一个", start: 5, end: 7 },
-                Token { word: "叛徒", start: 7, end: 9 }
+                Token {
+                    word: "我们",
+                    start: 0,
+                    end: 2
+                },
+                Token {
+                    word: "中出",
+                    start: 2,
+                    end: 4
+                },
+                Token {
+                    word: "了",
+                    start: 4,
+                    end: 5
+                },
+                Token {
+                    word: "一个",
+                    start: 5,
+                    end: 7
+                },
+                Token {
+                    word: "叛徒",
+                    start: 7,
+                    end: 9
+                }
             ]
         );
         let userdict = "出了 10000";
@@ -933,11 +1154,31 @@ mod tests {
         assert_eq!(
             tokens,
             vec![
-                Token { word: "我们", start: 0, end: 2 },
-                Token { word: "中", start: 2, end: 3 },
-                Token { word: "出了", start: 3, end: 5 },
-                Token { word: "一个", start: 5, end: 7 },
-                Token { word: "叛徒", start: 7, end: 9 }
+                Token {
+                    word: "我们",
+                    start: 0,
+                    end: 2
+                },
+                Token {
+                    word: "中",
+                    start: 2,
+                    end: 3
+                },
+                Token {
+                    word: "出了",
+                    start: 3,
+                    end: 5
+                },
+                Token {
+                    word: "一个",
+                    start: 5,
+                    end: 7
+                },
+                Token {
+                    word: "叛徒",
+                    start: 7,
+                    end: 9
+                }
             ]
         );
     }
