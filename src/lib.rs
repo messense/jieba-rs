@@ -22,6 +22,22 @@
 //!     assert_eq!(words, vec!["我们", "中", "出", "了", "一个", "叛徒"]);
 //! }
 //! ```
+//!
+//! ```
+//! use jieba_rs::Jieba;
+//! use jieba_rs::{TFIDF, KeywordExtract};
+//!
+//! fn main() {
+//!     let jieba = Jieba::new();
+//!     let keyword_extractor = TFIDF::new_with_jieba(&jieba);
+//!     let top_k = keyword_extractor.extract_tags(
+//!         "今天纽约的天气真好啊，京华大酒店的张尧经理吃了一只北京烤鸭。后天纽约的天气不好，昨天纽约的天气也不好，北京烤鸭真好吃",
+//!         3,
+//!         vec![],
+//!     );
+//!     assert_eq!(top_k, vec!["北京烤鸭", "纽约", "天气"]);
+//! }
+//! ```
 
 use lazy_static::lazy_static;
 
@@ -32,7 +48,10 @@ use std::io::{self, BufRead, BufReader};
 use regex::{Match, Matches, Regex};
 use smallvec::SmallVec;
 
+pub use crate::tfidf::{TFIDF, KeywordExtract};
+
 mod hmm;
+pub mod tfidf;
 
 static DEFAULT_DICT: &str = include_str!("data/dict.txt");
 
@@ -678,7 +697,7 @@ impl Jieba {
     /// `sentence`: input text
     ///
     /// `hmm`: enable HMM or not
-    pub fn tag<'a>(&'a self, sentence: &'a str, hmm: bool) -> Vec<Tag<'a>> {
+    pub fn tag<'a>(&'a self, sentence: &'a str, hmm: bool) -> Vec<Tag> {
         let words = self.cut(sentence, hmm);
         let tags = words
             .into_iter()
