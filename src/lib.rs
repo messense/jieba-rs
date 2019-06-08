@@ -38,6 +38,22 @@
 //!     assert_eq!(top_k, vec!["北京烤鸭", "纽约", "天气"]);
 //! }
 //! ```
+//!
+//! ```
+//! use jieba_rs::Jieba;
+//! use jieba_rs::{TextRank, KeywordExtract};
+//!
+//! fn main() {
+//!     let jieba = Jieba::new();
+//!     let keyword_extractor = TextRank::new_with_jieba(&jieba);
+//!     let top_k = keyword_extractor.extract_tags(
+//!         "此外，公司拟对全资子公司吉林欧亚置业有限公司增资4.3亿元，增资后，吉林欧亚置业注册资本由7000万元增加到5亿元。吉林欧亚置业主要经营范围为房地产开发及百货零售等业务。目前在建吉林欧亚城市商业综合体项目。2013年，实现营业收入0万元，实现净利润-139.13万元。",
+//!         6,
+//!         vec![String::from("ns"), String::from("n"), String::from("vn"), String::from("v")],
+//!     );
+//!     assert_eq!(top_k, vec!["吉林", "欧亚", "置业", "实现", "收入", "增资"]);
+//! }
+//! ```
 
 use lazy_static::lazy_static;
 
@@ -49,9 +65,11 @@ use regex::{Match, Matches, Regex};
 use smallvec::SmallVec;
 
 pub use crate::tfidf::{TFIDF, KeywordExtract};
+pub use crate::textrank::TextRank;
 
 mod hmm;
 pub mod tfidf;
+pub mod textrank;
 
 static DEFAULT_DICT: &str = include_str!("data/dict.txt");
 
