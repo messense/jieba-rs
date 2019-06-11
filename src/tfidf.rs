@@ -5,7 +5,7 @@ use std::collections::{BTreeSet, BinaryHeap};
 use std::io::{self, BufRead, BufReader};
 
 lazy_static! {
-    static ref STOP_WORDS: BTreeSet<String> = {
+    pub static ref STOP_WORDS: BTreeSet<String> = {
         let mut set = BTreeSet::new();
         let words = [
             "the", "of", "is", "and", "to", "in", "that", "we", "for", "an", "are", "by", "be", "as", "on", "with",
