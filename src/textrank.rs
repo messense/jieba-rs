@@ -1,8 +1,8 @@
 use super::Jieba;
-use hashbrown::HashMap;
-use std::collections::{BTreeSet, BinaryHeap};
 use crate::tfidf::KeywordExtract;
 use crate::tfidf::STOP_WORDS;
+use hashbrown::HashMap;
+use std::collections::{BTreeSet, BinaryHeap};
 
 type Weight = f64;
 
@@ -78,7 +78,7 @@ pub struct TextRank<'a> {
 impl<'a> TextRank<'a> {
     pub fn new_with_jieba(jieba: &'a Jieba) -> Self {
         TextRank { jieba: jieba, span: 5 }
-    } 
+    }
 }
 
 impl<'a> KeywordExtract for TextRank<'a> {
@@ -204,7 +204,7 @@ mod tests {
             vec![String::from("ns"), String::from("n"), String::from("vn"), String::from("v")],
         );
         assert_eq!(top_k, vec!["吉林", "欧亚", "置业", "实现", "收入", "增资"]);
-        
+
         top_k = keyword_extractor.extract_tags(
             "It is nice weather in New York City. and今天纽约的天气真好啊，and京华大酒店的张尧经理吃了一只北京烤鸭。and后天纽约的天气不好，and昨天纽约的天气也不好，and北京烤鸭真好吃",
             3,

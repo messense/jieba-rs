@@ -64,12 +64,12 @@ use std::io::{self, BufRead, BufReader};
 use regex::{Match, Matches, Regex};
 use smallvec::SmallVec;
 
-pub use crate::tfidf::{TFIDF, KeywordExtract};
 pub use crate::textrank::TextRank;
+pub use crate::tfidf::{KeywordExtract, TFIDF};
 
 mod hmm;
-pub mod tfidf;
 pub mod textrank;
+pub mod tfidf;
 
 static DEFAULT_DICT: &str = include_str!("data/dict.txt");
 
