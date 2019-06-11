@@ -224,8 +224,7 @@ impl Jieba {
 
         self.dict.insert(word.to_string(), (freq, tag.to_string()));
         let char_indices = word.char_indices().map(|x| x.0).collect::<Vec<_>>();
-        for i in 1..char_indices.len() {
-            let index = char_indices[i];
+        for index in char_indices.into_iter().skip(1) {
             let wfrag = &word[0..index];
             self.dict.entry(wfrag.to_string()).or_insert((0, "".to_string()));
         }
@@ -248,7 +247,7 @@ impl Jieba {
 
                 let word = parts[0];
                 let freq = parts.get(1).map(|x| x.parse::<usize>().unwrap());
-                let tag = parts.get(2).map(|x| *x);
+                let tag = parts.get(2).cloned();
 
                 self.add_word(word, freq, tag);
             }
@@ -259,8 +258,8 @@ impl Jieba {
 
     fn get_word_freq(&self, word: &str, default: usize) -> usize {
         match self.dict.get(word) {
-            Some(e) => match e {
-                &(freq, _) => freq,
+            Some(e) => match *e {
+                (freq, _) => freq,
             },
             _ => default,
         }
@@ -278,7 +277,7 @@ impl Jieba {
     fn calc(&self, sentence: &str, char_indices: &[usize], dag: &DAG) -> Vec<(f64, usize)> {
         let word_count = char_indices.len();
         let mut route = Vec::with_capacity(word_count + 1);
-        for _ in 0..word_count + 1 {
+        for _ in 0..=word_count {
             route.push((0.0, 0));
         }
         let logtotal = (self.total as f64).ln();
@@ -452,21 +451,15 @@ impl Jieba {
                     };
                     if buf_indices.len() == 1 {
                         words.push(word);
+                    } else if !self.dict.get(word).map(|x| x.0 > 0).unwrap_or(false) {
+                        words.extend(hmm::cut(word));
                     } else {
-                        if !self.dict.get(word).map(|x| x.0 > 0).unwrap_or(false) {
-                            words.extend(hmm::cut(word));
-                        } else {
-                            let mut word_indices = word.char_indices().map(|x| x.0).peekable();
-                            loop {
-                                if let Some(byte_start) = word_indices.next() {
-                                    if let Some(byte_end) = word_indices.peek() {
-                                        words.push(&word[byte_start..*byte_end]);
-                                    } else {
-                                        words.push(&word[byte_start..]);
-                                    }
-                                } else {
-                                    break;
-                                }
+                        let mut word_indices = word.char_indices().map(|x| x.0).peekable();
+                        while let Some(byte_start) = word_indices.next() {
+                            if let Some(byte_end) = word_indices.peek() {
+                                words.push(&word[byte_start..*byte_end]);
+                            } else {
+                                words.push(&word[byte_start..]);
                             }
                         }
                     }
@@ -492,21 +485,15 @@ impl Jieba {
             };
             if buf_indices.len() == 1 {
                 words.push(word);
+            } else if !self.dict.get(word).map(|x| x.0 > 0).unwrap_or(false) {
+                words.extend(hmm::cut(word));
             } else {
-                if !self.dict.get(word).map(|x| x.0 > 0).unwrap_or(false) {
-                    words.extend(hmm::cut(word));
-                } else {
-                    let mut word_indices = word.char_indices().map(|x| x.0).peekable();
-                    loop {
-                        if let Some(byte_start) = word_indices.next() {
-                            if let Some(byte_end) = word_indices.peek() {
-                                words.push(&word[byte_start..*byte_end]);
-                            } else {
-                                words.push(&word[byte_start..]);
-                            }
-                        } else {
-                            break;
-                        }
+                let mut word_indices = word.char_indices().map(|x| x.0).peekable();
+                while let Some(byte_start) = word_indices.next() {
+                    if let Some(byte_end) = word_indices.peek() {
+                        words.push(&word[byte_start..*byte_end]);
+                    } else {
+                        words.push(&word[byte_start..]);
                     }
                 }
             }
@@ -528,12 +515,10 @@ impl Jieba {
 
                     if cut_all {
                         words.extend(self.cut_all_internal(block));
+                    } else if hmm {
+                        words.extend(self.cut_dag_hmm(block));
                     } else {
-                        if hmm {
-                            words.extend(self.cut_dag_hmm(block));
-                        } else {
-                            words.extend(self.cut_dag_no_hmm(block));
-                        }
+                        words.extend(self.cut_dag_no_hmm(block));
                     }
                 }
                 SplitState::Unmatched(_) => {
@@ -550,15 +535,11 @@ impl Jieba {
                             words.push(word);
                         } else {
                             let mut word_indices = word.char_indices().map(|x| x.0).peekable();
-                            loop {
-                                if let Some(byte_start) = word_indices.next() {
-                                    if let Some(byte_end) = word_indices.peek() {
-                                        words.push(&word[byte_start..*byte_end]);
-                                    } else {
-                                        words.push(&word[byte_start..]);
-                                    }
+                            while let Some(byte_start) = word_indices.next() {
+                                if let Some(byte_end) = word_indices.peek() {
+                                    words.push(&word[byte_start..*byte_end]);
                                 } else {
-                                    break;
+                                    words.push(&word[byte_start..]);
                                 }
                             }
                         }
@@ -717,7 +698,7 @@ impl Jieba {
     /// `hmm`: enable HMM or not
     pub fn tag<'a>(&'a self, sentence: &'a str, hmm: bool) -> Vec<Tag> {
         let words = self.cut(sentence, hmm);
-        let tags = words
+        words
             .into_iter()
             .map(|word| {
                 if let Some(tag) = self.dict.get(word) {
@@ -744,8 +725,7 @@ impl Jieba {
                 };
                 Tag { word, tag }
             })
-            .collect();
-        tags
+            .collect()
     }
 }
 

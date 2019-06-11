@@ -88,7 +88,7 @@ fn viterbi(sentence: &str, char_indices: &[usize]) -> Vec<Status> {
         assert!(t > 0);
         best_path[t - 1] = p;
         curr = p;
-        t = t - 1;
+        t -= 1;
     }
 
     best_path

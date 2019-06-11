@@ -43,7 +43,7 @@ pub struct TFIDF<'a> {
 impl<'a> TFIDF<'a> {
     pub fn new_with_jieba(jieba: &'a Jieba) -> Self {
         let mut instance = TFIDF {
-            jieba: jieba,
+            jieba,
             idf_dict: HashMap::new(),
             median_idf: 0,
         };

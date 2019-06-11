@@ -15,11 +15,7 @@ struct Edge {
 
 impl Edge {
     fn new(src: usize, dst: usize, weight: Weight) -> Edge {
-        Edge {
-            src: src,
-            dst: dst,
-            weight: weight,
-        }
+        Edge { src, dst, weight }
     }
 }
 
@@ -77,7 +73,7 @@ pub struct TextRank<'a> {
 
 impl<'a> TextRank<'a> {
     pub fn new_with_jieba(jieba: &'a Jieba) -> Self {
-        TextRank { jieba: jieba, span: 5 }
+        TextRank { jieba, span: 5 }
     }
 }
 
@@ -97,7 +93,7 @@ impl<'a> KeywordExtract for TextRank<'a> {
                 continue;
             }
 
-            if let None = word2id.get(t.word) {
+            if word2id.get(t.word).is_none() {
                 unique_words.push(String::from(t.word));
                 word2id.insert(String::from(t.word), unique_words.len() - 1);
             }
