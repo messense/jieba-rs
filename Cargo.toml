@@ -19,3 +19,11 @@ hashbrown = "0.4.0"
 
 [build-dependencies]
 phf_codegen = "0.7"
+
+[features]
+default = []
+tfidf = []
+textrank = []
+
+[package.metadata.docs.rs]
+all-features = true

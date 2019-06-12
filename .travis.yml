@@ -23,16 +23,19 @@ before_script:
 script:
   - cargo fmt --all -- --check
   - cargo build
-  - cargo test
+  - cargo build --features tfidf
+  - cargo build --features textrank
+  - cargo build --all-features
+  - cargo test --all-features
   - |
     if [[ "$TRAVIS_OS_NAME" == "linux" && "$TRAVIS_RUST_VERSION" == "stable" ]]; then
-      cargo clippy
+      cargo clippy --all-features
     fi
 
 after_success:
   - |
-    if [[ "$TRAVIS_OS_NAME" == "linux" && "$TRAVIS_RUST_VERSION" == "nightly" ]]; then
-      RUSTFLAGS="--cfg procmacro2_semver_exempt" cargo install cargo-tarpaulin
-      cargo tarpaulin --out Xml
+    if [[ "$TRAVIS_OS_NAME" == "linux" && "$TRAVIS_RUST_VERSION" == "stable" ]]; then
+      bash <(curl https://raw.githubusercontent.com/xd009642/tarpaulin/master/travis-install.sh)
+      cargo tarpaulin --all-features --out Xml
       bash <(curl -s https://codecov.io/bash)
     fi
