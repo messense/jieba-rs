@@ -13,7 +13,7 @@ Add it to your ``Cargo.toml``:
 
 ```toml
 [dependencies]
-jieba-rs = "0.3"
+jieba-rs = "0.4"
 ```
 
 then you are good to go. If you are using Rust 2015 you have to ``extern crate jieba_rs`` to your crate root as well. 
@@ -37,7 +37,7 @@ fn main() {
 
 ```toml
 [dependencies]
-jieba-rs = { version = "0.3", features = ["tfidf", "textrank"] }
+jieba-rs = { version = "0.4", features = ["tfidf", "textrank"] }
 ```
 
 ## License
