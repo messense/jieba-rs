@@ -9,7 +9,7 @@
 //! jieba-rs = "0.3"
 //! ```
 //!
-//! Add `extern crate jieba_rs` to your crate root and your're good to go!
+//! then you are good to go. If you are using Rust 2015 you have to ``extern crate jieba_rs`` to your crate root as well. 
 //!
 //! ## Example
 //!
@@ -54,6 +54,18 @@
 //!     assert_eq!(top_k, vec!["吉林", "欧亚", "置业", "实现", "收入", "增资"]);
 //! }
 //! ```
+//!
+//! ## Enabling Additional Features
+//!
+//! * `tfidf` feature enables TF-IDF keywords extractor
+//! * `textrank` feature enables TextRank keywords extractor
+//!
+//! ```toml
+//! [dependencies]
+//! jieba-rs = { version = "0.3", features = ["tfidf", "textrank"] }
+//! ```
+//!
+
 
 use lazy_static::lazy_static;
 

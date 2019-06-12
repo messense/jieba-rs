@@ -30,6 +30,16 @@ fn main() {
 }
 ```
 
+## Enabling Additional Features
+
+* `tfidf` feature enables TF-IDF keywords extractor
+* `textrank` feature enables TextRank keywords extractor
+
+```toml
+[dependencies]
+jieba-rs = { version = "0.3", features = ["tfidf", "textrank"] }
+```
+
 ## License
 
 This work is released under the MIT license. A copy of the license is provided in the [LICENSE](./LICENSE) file.
