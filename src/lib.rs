@@ -23,7 +23,7 @@
 //! }
 //! ```
 //!
-//! ```
+//! ```rust
 //! use jieba_rs::Jieba;
 //! use jieba_rs::{TFIDF, KeywordExtract};
 //!
@@ -39,7 +39,7 @@
 //! }
 //! ```
 //!
-//! ```
+//! ```rust
 //! use jieba_rs::Jieba;
 //! use jieba_rs::{TextRank, KeywordExtract};
 //!
@@ -64,12 +64,16 @@ use std::io::{self, BufRead, BufReader};
 use regex::{Match, Matches, Regex};
 use smallvec::SmallVec;
 
-pub use crate::textrank::TextRank;
-pub use crate::tfidf::{KeywordExtract, TFIDF};
+#[cfg(feature = "textrank")]
+pub use crate::keywords::textrank::TextRank;
+#[cfg(feature = "tfidf")]
+pub use crate::keywords::tfidf::TFIDF;
+#[cfg(any(feature = "tfidf", feature = "textrank"))]
+pub use crate::keywords::KeywordExtract;
 
 mod hmm;
-pub mod textrank;
-pub mod tfidf;
+#[cfg(any(feature = "tfidf", feature = "textrank"))]
+mod keywords;
 
 static DEFAULT_DICT: &str = include_str!("data/dict.txt");
 

@@ -1,31 +1,10 @@
-use super::Jieba;
+use super::{KeywordExtract, STOP_WORDS};
+use crate::Jieba;
 use hashbrown::HashMap;
-use lazy_static::lazy_static;
 use std::collections::{BTreeSet, BinaryHeap};
 use std::io::{self, BufRead, BufReader};
 
-lazy_static! {
-    pub static ref STOP_WORDS: BTreeSet<String> = {
-        let mut set = BTreeSet::new();
-        let words = [
-            "the", "of", "is", "and", "to", "in", "that", "we", "for", "an", "are", "by", "be", "as", "on", "with",
-            "can", "if", "from", "which", "you", "it", "this", "then", "at", "have", "all", "not", "one", "has", "or",
-            "that",
-        ];
-
-        for &s in words.iter() {
-            set.insert(String::from(s));
-        }
-
-        set
-    };
-}
-
-static DEFAULT_IDF: &str = include_str!("data/idf.txt");
-
-pub trait KeywordExtract {
-    fn extract_tags<'a>(&'a self, _: &'a str, _: usize, _: Vec<String>) -> Vec<String>;
-}
+static DEFAULT_IDF: &str = include_str!("../data/idf.txt");
 
 #[derive(Debug, Clone, Eq, PartialEq, PartialOrd, Ord)]
 struct HeapNode<'a> {

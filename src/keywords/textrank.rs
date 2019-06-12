@@ -1,6 +1,5 @@
-use super::Jieba;
-use crate::tfidf::KeywordExtract;
-use crate::tfidf::STOP_WORDS;
+use super::{KeywordExtract, STOP_WORDS};
+use crate::Jieba;
 use hashbrown::HashMap;
 use std::collections::{BTreeSet, BinaryHeap};
 
