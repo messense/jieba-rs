@@ -9,7 +9,7 @@
 //! jieba-rs = "0.3"
 //! ```
 //!
-//! then you are good to go. If you are using Rust 2015 you have to ``extern crate jieba_rs`` to your crate root as well. 
+//! then you are good to go. If you are using Rust 2015 you have to ``extern crate jieba_rs`` to your crate root as well.
 //!
 //! ## Example
 //!
@@ -65,7 +65,6 @@
 //! jieba-rs = { version = "0.3", features = ["tfidf", "textrank"] }
 //! ```
 //!
-
 
 use lazy_static::lazy_static;
 
