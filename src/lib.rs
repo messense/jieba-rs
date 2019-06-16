@@ -91,9 +91,9 @@ static DEFAULT_DICT: &str = include_str!("data/dict.txt");
 type DAG = BTreeMap<usize, SmallVec<[usize; 5]>>;
 
 lazy_static! {
-    static ref RE_HAN_DEFAULT: Regex = Regex::new(r"([\u{4E00}-\u{9FD5}a-zA-Z0-9+#&\._%]+)").unwrap();
+    static ref RE_HAN_DEFAULT: Regex = Regex::new(r"([\u{3400}-\u{4DBF}\u{4E00}-\u{9FFF}\u{F900}-\u{FAFF}\u{20000}-\u{2A6DF}\u{2A700}-\u{2B73F}\u{2B740}-\u{2B81F}\u{2B820}-\u{2CEAF}\u{2CEB0}-\u{2EBEF}\u{2F800}-\u{2FA1F}a-zA-Z0-9+#&\._%]+)").unwrap();
     static ref RE_SKIP_DEAFULT: Regex = Regex::new(r"(\r\n|\s)").unwrap();
-    static ref RE_HAN_CUT_ALL: Regex = Regex::new("([\u{4E00}-\u{9FD5}]+)").unwrap();
+    static ref RE_HAN_CUT_ALL: Regex = Regex::new(r"([\u{3400}-\u{4DBF}\u{4E00}-\u{9FFF}\u{F900}-\u{FAFF}\u{20000}-\u{2A6DF}\u{2A700}-\u{2B73F}\u{2B740}-\u{2B81F}\u{2B820}-\u{2CEAF}\u{2CEB0}-\u{2EBEF}\u{2F800}-\u{2FA1F}]+)").unwrap();
     static ref RE_SKIP_CUT_ALL: Regex = Regex::new(r"[^a-zA-Z0-9+#\n]").unwrap();
 }
 
@@ -777,6 +777,15 @@ mod tests {
     }
 
     #[test]
+    fn test_split_matches_against_unicode_sip() {
+        let re_han = &*RE_HAN_DEFAULT;
+        let splitter = SplitMatches::new(&re_han, "讥䶯䶰䶱䶲䶳䶴䶵𦡦");
+
+        let result: Vec<&str> = splitter.map(|x| x.into_str()).collect();
+        assert_eq!(result, vec!["讥䶯䶰䶱䶲䶳䶴䶵𦡦"]);
+    }
+
+    #[test]
     fn test_dag() {
         let jieba = Jieba::new();
         let sentence = "网球拍卖会";
@@ -1265,5 +1274,17 @@ mod tests {
         jieba.load_dict(&mut BufReader::new(userdict.as_bytes())).unwrap();
         // Now it's significant enough
         assert_eq!(jieba.suggest_freq("中出"), 500)
+    }
+
+    #[test]
+    fn test_cut_dag_no_hmm_against_string_with_sip() {
+        let mut jieba = Jieba::new();
+
+        //add fake word into dictionary
+        jieba.add_word("䶴䶵𦡦", Some(1000), None);
+        jieba.add_word("讥䶯䶰䶱䶲䶳", Some(1000), None);
+
+        let words = jieba.cut("讥䶯䶰䶱䶲䶳䶴䶵𦡦", false);
+        assert_eq!(words, vec!["讥䶯䶰䶱䶲䶳", "䶴䶵𦡦"]);
     }
 }
