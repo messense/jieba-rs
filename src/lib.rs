@@ -1278,7 +1278,7 @@ mod tests {
 
     #[test]
     fn test_cut_dag_no_hmm_against_string_with_sip() {
-        let mut jieba = Jieba::new();
+        let mut jieba = Jieba::empty();
 
         //add fake word into dictionary
         jieba.add_word("䶴䶵𦡦", Some(1000), None);
