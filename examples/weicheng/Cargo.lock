@@ -38,7 +38,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 
 [[package]]
 name = "jieba-rs"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "hashbrown 0.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "lazy_static 1.3.0 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -253,7 +253,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 name = "weicheng"
 version = "0.1.0"
 dependencies = [
- "jieba-rs 0.4.0",
+ "jieba-rs 0.4.1",
 ]
 
 [[package]]
