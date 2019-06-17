@@ -1,6 +1,7 @@
 use super::{KeywordExtract, STOP_WORDS};
 use crate::Jieba;
 use hashbrown::HashMap;
+use std::cmp::Ordering;
 use std::collections::{BTreeSet, BinaryHeap};
 
 type Weight = f64;
@@ -140,7 +141,11 @@ impl<'a> KeywordExtract for TextRank<'a> {
             heap.push(HeapNode {
                 rank: (v * 1e10) as u64,
                 word_id: k,
-            })
+            });
+
+            if k >= top_k {
+                heap.pop();
+            }
         }
 
         let mut res: Vec<String> = Vec::new();
@@ -150,14 +155,30 @@ impl<'a> KeywordExtract for TextRank<'a> {
             }
         }
 
+        res.reverse();
         res
     }
 }
 
-#[derive(Debug, Clone, Eq, PartialEq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 struct HeapNode {
     rank: u64, //using u64 but not f64 so that it conforms to Ord
     word_id: usize,
+}
+
+impl Ord for HeapNode {
+    fn cmp(&self, other: &HeapNode) -> Ordering {
+        other
+            .rank
+            .cmp(&self.rank)
+            .then_with(|| self.word_id.cmp(&other.word_id))
+    }
+}
+
+impl PartialOrd for HeapNode {
+    fn partial_cmp(&self, other: &HeapNode) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
 }
 
 #[inline]
