@@ -1,15 +1,28 @@
 use super::{KeywordExtract, STOP_WORDS};
 use crate::Jieba;
 use hashbrown::HashMap;
+use std::cmp::Ordering;
 use std::collections::{BTreeSet, BinaryHeap};
 use std::io::{self, BufRead, BufReader};
 
 static DEFAULT_IDF: &str = include_str!("../data/idf.txt");
 
-#[derive(Debug, Clone, Eq, PartialEq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 struct HeapNode<'a> {
     tfidf: u64, //using u64 but not f64 so that it conforms to Ord
     word: &'a str,
+}
+
+impl<'a> Ord for HeapNode<'a> {
+    fn cmp(&self, other: &HeapNode) -> Ordering {
+        other.tfidf.cmp(&self.tfidf).then_with(|| self.word.cmp(&other.word))
+    }
+}
+
+impl<'a> PartialOrd for HeapNode<'a> {
+    fn partial_cmp(&self, other: &HeapNode) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
 }
 
 #[derive(Debug)]
@@ -88,6 +101,7 @@ impl<'a> KeywordExtract for TFIDF<'a> {
         }
 
         let mut heap = BinaryHeap::new();
+        let mut cnt = 0;
         for (k, tf) in term_freq.iter() {
             if let Some(idf) = self.idf_dict.get(k) {
                 //we don't care about the total in tf since it doesn't change the ranking
@@ -103,6 +117,12 @@ impl<'a> KeywordExtract for TFIDF<'a> {
                 };
                 heap.push(node);
             }
+
+            if cnt >= top_k {
+                heap.pop();
+            }
+
+            cnt += 1;
         }
 
         let mut res: Vec<String> = Vec::new();
@@ -112,6 +132,7 @@ impl<'a> KeywordExtract for TFIDF<'a> {
             }
         }
 
+        res.reverse();
         res
     }
 }
