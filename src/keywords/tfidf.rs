@@ -101,8 +101,7 @@ impl<'a> KeywordExtract for TFIDF<'a> {
         }
 
         let mut heap = BinaryHeap::new();
-        let mut cnt = 0;
-        for (k, tf) in term_freq.iter() {
+        for (cnt, (k, tf)) in term_freq.iter().enumerate() {
             if let Some(idf) = self.idf_dict.get(k) {
                 //we don't care about the total in tf since it doesn't change the ranking
                 let node = HeapNode {
@@ -121,8 +120,6 @@ impl<'a> KeywordExtract for TFIDF<'a> {
             if cnt >= top_k {
                 heap.pop();
             }
-
-            cnt += 1;
         }
 
         let mut res: Vec<String> = Vec::new();
