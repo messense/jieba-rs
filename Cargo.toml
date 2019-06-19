@@ -10,6 +10,13 @@ readme = "README.md"
 repository = "https://github.com/messense/jieba-rs"
 edition = '2018'
 
+[dev-dependencies]
+criterion = "0.2"
+
+[[bench]]
+name = "jieba_benchmark"
+harness = false
+
 [dependencies]
 smallvec = "0.6"
 regex = "1.0"
