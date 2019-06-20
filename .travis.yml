@@ -30,7 +30,7 @@ script:
   - |
     if [[ "$TRAVIS_OS_NAME" == "linux" && "$TRAVIS_RUST_VERSION" == "stable" ]]; then
       cargo clippy --all-features
-      cargo bench -- --test
+      cargo bench --all-features -- --test
     fi
 
 after_success:
