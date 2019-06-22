@@ -193,7 +193,7 @@ pub struct Tag<'a> {
 }
 
 /// Jieba segmentation
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Jieba {
     dict: hashbrown::HashMap<String, (usize, String)>,
     total: usize,
