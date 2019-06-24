@@ -85,6 +85,7 @@ pub use crate::keywords::KeywordExtract;
 mod hmm;
 #[cfg(any(feature = "tfidf", feature = "textrank"))]
 mod keywords;
+pub mod unstable;
 
 static DEFAULT_DICT: &str = include_str!("data/dict.txt");
 
@@ -464,6 +465,7 @@ impl Jieba {
                     } else {
                         &sentence[byte_start..]
                     };
+
                     if buf_indices.len() == 1 {
                         words.push(word);
                     } else if !self.dict.get(word).map(|x| x.0 > 0).unwrap_or(false) {

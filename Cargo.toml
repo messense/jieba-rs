@@ -25,6 +25,7 @@ regex = "1.0"
 lazy_static = "1.0"
 phf = "0.7"
 hashbrown = "0.5.0"
+darts = "0.1" 
 
 [build-dependencies]
 phf_codegen = "0.7"

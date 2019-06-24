@@ -3,6 +3,7 @@ extern crate criterion;
 
 use criterion::black_box;
 use criterion::Criterion;
+use jieba_rs::unstable::JiebaUnstable;
 use jieba_rs::{Jieba, KeywordExtract, TextRank, TokenizeMode, TFIDF};
 use lazy_static::lazy_static;
 use rand::Rng;
@@ -12,6 +13,12 @@ use std::collections::btree_map::BTreeMap;
 lazy_static! {
     static ref JIEBA: Jieba = Jieba::new();
 }
+
+lazy_static! {
+    static ref JIEBA_UNSTABLE: JiebaUnstable = JiebaUnstable::new();
+}
+
+#[cfg(feature = "tfidf")]
 lazy_static! {
     static ref TFIDF_EXTRACTOR: TFIDF<'static> = TFIDF::new_with_jieba(&JIEBA);
 }
@@ -83,6 +90,17 @@ fn criterion_benchmark(c: &mut Criterion) {
     c.bench_function("jieba cut no hmm", |b| {
         b.iter(|| {
             JIEBA.cut(
+                black_box(
+                    "我是拖拉机学院手扶拖拉机专业的。不用多久，我就会升职加薪，当上CEO，走上人生巅峰。",
+                ),
+                false,
+            )
+        })
+    });
+
+    c.bench_function("jieba unstable cut no hmm", |b| {
+        b.iter(|| {
+            JIEBA_UNSTABLE.cut(
                 black_box(
                     "我是拖拉机学院手扶拖拉机专业的。不用多久，我就会升职加薪，当上CEO，走上人生巅峰。",
                 ),
