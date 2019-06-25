@@ -6,7 +6,3 @@ edition = "2018"
 
 [dependencies]
 jieba-rs = { path = "../.." }
-
-[profile.release]
-lto = true
-debug = true

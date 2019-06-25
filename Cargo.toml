@@ -36,3 +36,9 @@ textrank = []
 
 [package.metadata.docs.rs]
 all-features = true
+
+[workspace]
+members = [
+    ".",
+    "examples/weicheng"
+]

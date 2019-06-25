@@ -602,6 +602,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "weicheng"
+version = "0.1.0"
+dependencies = [
+ "jieba-rs 0.4.1",
+]
+
+[[package]]
 name = "winapi"
 version = "0.3.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
