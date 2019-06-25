@@ -3,7 +3,7 @@ extern crate criterion;
 
 use criterion::black_box;
 use criterion::Criterion;
-use jieba_rs::{Jieba, TokenizeMode, KeywordExtract, TFIDF, TextRank};
+use jieba_rs::{Jieba, KeywordExtract, TextRank, TokenizeMode, TFIDF};
 use lazy_static::lazy_static;
 use rand::Rng;
 use smallvec::SmallVec;

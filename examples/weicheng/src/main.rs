@@ -1,5 +1,5 @@
-use std::time;
 use jieba_rs::Jieba;
+use std::time;
 
 static WEICHENG_TXT: &str = include_str!("weicheng.txt");
 
