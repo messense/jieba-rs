@@ -40,6 +40,12 @@ fn main() {
 jieba-rs = { version = "0.4", features = ["tfidf", "textrank"] }
 ```
 
+## Run benchmark
+
+```bash
+cargo bench --all-features
+```
+
 ## License
 
 This work is released under the MIT license. A copy of the license is provided in the [LICENSE](./LICENSE) file.

@@ -17,6 +17,7 @@ rand = "0.6"
 [[bench]]
 name = "jieba_benchmark"
 harness = false
+required-features = ["tfidf", "textrank"]
 
 [dependencies]
 smallvec = "0.6"

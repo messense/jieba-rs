@@ -3,13 +3,7 @@ extern crate criterion;
 
 use criterion::black_box;
 use criterion::Criterion;
-#[cfg(any(feature = "tfidf", feature = "textrank"))]
-use jieba_rs::KeywordExtract;
-#[cfg(feature = "textrank")]
-use jieba_rs::TextRank;
-#[cfg(feature = "tfidf")]
-use jieba_rs::TFIDF;
-use jieba_rs::{Jieba, TokenizeMode};
+use jieba_rs::{Jieba, TokenizeMode, KeywordExtract, TFIDF, TextRank};
 use lazy_static::lazy_static;
 use rand::Rng;
 use smallvec::SmallVec;
@@ -18,11 +12,9 @@ use std::collections::btree_map::BTreeMap;
 lazy_static! {
     static ref JIEBA: Jieba = Jieba::new();
 }
-#[cfg(feature = "tfidf")]
 lazy_static! {
     static ref TFIDF_EXTRACTOR: TFIDF<'static> = TFIDF::new_with_jieba(&JIEBA);
 }
-#[cfg(feature = "textrank")]
 lazy_static! {
     static ref TEXTRANK_EXTRACTOR: TextRank<'static> = TextRank::new_with_jieba(&JIEBA);
 }
@@ -180,7 +172,6 @@ fn criterion_benchmark(c: &mut Criterion) {
         })
     });
 
-    #[cfg(feature = "tfidf")]
     c.bench_function("jieba tfidf", |b| {
         b.iter(|| {
             TFIDF_EXTRACTOR.extract_tags(
@@ -193,7 +184,6 @@ fn criterion_benchmark(c: &mut Criterion) {
         })
     });
 
-    #[cfg(feature = "textrank")]
     c.bench_function("jieba textrank", |b| {
         b.iter(|| {
             TEXTRANK_EXTRACTOR.extract_tags(
