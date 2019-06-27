@@ -197,6 +197,7 @@ pub struct Tag<'a> {
 pub struct Jieba {
     dict: hashbrown::HashMap<String, (usize, String)>,
     total: usize,
+    longest_word_len: usize,
 }
 
 impl Default for Jieba {
@@ -211,6 +212,7 @@ impl Jieba {
         Jieba {
             dict: hashbrown::HashMap::new(),
             total: 0,
+            longest_word_len: 0,
         }
     }
 
@@ -245,6 +247,11 @@ impl Jieba {
         }
 
         self.total += freq;
+
+        let curr_word_len = word.chars().count();
+        if self.longest_word_len < curr_word_len {
+            self.longest_word_len = curr_word_len;
+        }
 
         freq
     }
@@ -329,7 +336,9 @@ impl Jieba {
             } else {
                 &sentence[byte_start..]
             };
-            while i < word_count {
+
+            let upper_bound = std::cmp::min(word_count, k + self.longest_word_len);
+            while i < upper_bound {
                 if let Some(freq) = self.dict.get(wfrag).map(|x| x.0) {
                     if freq > 0 {
                         tmplist.push(i);
