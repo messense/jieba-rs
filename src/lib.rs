@@ -295,9 +295,13 @@ impl Jieba {
         std::cmp::max((logfreq + logtotal).exp() as usize + 1, self.get_word_freq(segment, 1))
     }
 
-    fn calc(&self, sentence: &str, char_indices: &[usize], dag: &DAG) -> Vec<(f64, usize)> {
+    fn calc(&self, sentence: &str, char_indices: &[usize], dag: &DAG, route: &mut Vec<(f64, usize)>) {
         let word_count = char_indices.len();
-        let mut route = Vec::with_capacity(word_count + 1);
+
+        if word_count + 1 > route.capacity() {
+            route.resize(word_count + 1, (0.0, 0));
+        }
+
         for _ in 0..=word_count {
             route.push((0.0, 0));
         }
@@ -320,12 +324,15 @@ impl Jieba {
                 .max_by(|x, y| x.partial_cmp(y).unwrap_or(Ordering::Equal));
             route[i] = pair.unwrap();
         }
-        route
     }
 
-    fn dag(&self, sentence: &str, char_indices: &[usize]) -> DAG {
+    fn dag(&self, sentence: &str, char_indices: &[usize], dag: &mut DAG) {
         let word_count = char_indices.len();
-        let mut dag = DAG::with_capacity(word_count);
+
+        if word_count > dag.capacity() {
+            dag.resize(word_count, SmallVec::new());
+        }
+
         for (k, &byte_start) in char_indices.iter().enumerate() {
             let mut tmplist = SmallVec::new();
             let mut i = k;
@@ -357,12 +364,12 @@ impl Jieba {
             }
             dag.insert(k, tmplist);
         }
-        dag
     }
 
     fn cut_all_internal<'a>(&self, sentence: &'a str, words: &mut Vec<&'a str>) {
         let char_indices: Vec<usize> = sentence.char_indices().map(|x| x.0).collect();
-        let dag = self.dag(sentence, &char_indices);
+        let mut dag = Vec::with_capacity(char_indices.len());
+        self.dag(sentence, &char_indices, &mut dag);
 
         let mut old_j = -1;
         for (k, list) in dag.into_iter().enumerate() {
@@ -394,10 +401,17 @@ impl Jieba {
         }
     }
 
-    fn cut_dag_no_hmm<'a>(&self, sentence: &'a str, buf_indices: &mut Vec<usize>, words: &mut Vec<&'a str>) {
+    fn cut_dag_no_hmm<'a>(
+        &self,
+        sentence: &'a str,
+        buf_indices: &mut Vec<usize>,
+        words: &mut Vec<&'a str>,
+        route: &mut Vec<(f64, usize)>,
+        dag: &mut DAG,
+    ) {
         let char_indices: Vec<usize> = sentence.char_indices().map(|x| x.0).collect();
-        let dag = self.dag(sentence, &char_indices);
-        let route = self.calc(sentence, &char_indices, &dag);
+        self.dag(sentence, &char_indices, dag);
+        self.calc(sentence, &char_indices, dag, route);
         let mut x = 0;
 
         while x < char_indices.len() {
@@ -444,12 +458,22 @@ impl Jieba {
             words.push(word);
             buf_indices.clear();
         }
+
+        dag.clear();
+        route.clear();
     }
 
-    fn cut_dag_hmm<'a>(&self, sentence: &'a str, buf_indices: &mut Vec<usize>, words: &mut Vec<&'a str>) {
+    fn cut_dag_hmm<'a>(
+        &self,
+        sentence: &'a str,
+        buf_indices: &mut Vec<usize>,
+        words: &mut Vec<&'a str>,
+        route: &mut Vec<(f64, usize)>,
+        dag: &mut DAG,
+    ) {
         let char_indices: Vec<usize> = sentence.char_indices().map(|x| x.0).collect();
-        let dag = self.dag(sentence, &char_indices);
-        let route = self.calc(sentence, &char_indices, &dag);
+        self.dag(sentence, &char_indices, dag);
+        self.calc(sentence, &char_indices, dag, route);
         let mut x = 0;
 
         while x < char_indices.len() {
@@ -517,6 +541,9 @@ impl Jieba {
             }
             buf_indices.clear();
         }
+
+        dag.clear();
+        route.clear();
     }
 
     fn cut_internal<'a>(&self, sentence: &'a str, cut_all: bool, hmm: bool) -> Vec<&'a str> {
@@ -526,6 +553,8 @@ impl Jieba {
         let re_skip: &Regex = if cut_all { &*RE_SKIP_CUT_ALL } else { &*RE_SKIP_DEAFULT };
         let splitter = SplitMatches::new(&re_han, sentence);
         let mut buf_indices = Vec::with_capacity(heuristic_capacity);
+        let mut route = Vec::with_capacity(heuristic_capacity);
+        let mut dag = Vec::with_capacity(heuristic_capacity);
 
         for state in splitter {
             match state {
@@ -536,9 +565,9 @@ impl Jieba {
                     if cut_all {
                         self.cut_all_internal(block, &mut words);
                     } else if hmm {
-                        self.cut_dag_hmm(block, &mut buf_indices, &mut words);
+                        self.cut_dag_hmm(block, &mut buf_indices, &mut words, &mut route, &mut dag);
                     } else {
-                        self.cut_dag_no_hmm(block, &mut buf_indices, &mut words);
+                        self.cut_dag_no_hmm(block, &mut buf_indices, &mut words, &mut route, &mut dag);
                     }
                 }
                 SplitState::Unmatched(_) => {
@@ -751,7 +780,7 @@ impl Jieba {
 
 #[cfg(test)]
 mod tests {
-    use super::{Jieba, SplitMatches, SplitState, Tag, Token, TokenizeMode, RE_HAN_DEFAULT};
+    use super::{Jieba, SplitMatches, SplitState, Tag, Token, TokenizeMode, DAG, RE_HAN_DEFAULT};
     use smallvec::SmallVec;
     use std::io::BufReader;
 
@@ -795,7 +824,8 @@ mod tests {
         let jieba = Jieba::new();
         let sentence = "网球拍卖会";
         let char_indices: Vec<usize> = sentence.char_indices().map(|x| x.0).collect();
-        let dag = jieba.dag(sentence, &char_indices);
+        let mut dag = DAG::new();
+        jieba.dag(sentence, &char_indices, &mut dag);
         assert_eq!(dag[0], SmallVec::from_buf([0, 1, 2]));
         assert_eq!(dag[1], SmallVec::from_buf([1, 2]));
         assert_eq!(dag[2], SmallVec::from_buf([2, 3, 4]));
