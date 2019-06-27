@@ -69,7 +69,6 @@
 use lazy_static::lazy_static;
 
 use std::cmp::Ordering;
-use std::collections::BTreeMap;
 use std::io::{self, BufRead, BufReader};
 
 use regex::{Match, Matches, Regex};
@@ -88,7 +87,7 @@ mod keywords;
 
 static DEFAULT_DICT: &str = include_str!("data/dict.txt");
 
-type DAG = BTreeMap<usize, SmallVec<[usize; 5]>>;
+type DAG = Vec<SmallVec<[usize; 5]>>;
 
 lazy_static! {
     static ref RE_HAN_DEFAULT: Regex = Regex::new(r"([\u{3400}-\u{4DBF}\u{4E00}-\u{9FFF}\u{F900}-\u{FAFF}\u{20000}-\u{2A6DF}\u{2A700}-\u{2B73F}\u{2B740}-\u{2B81F}\u{2B820}-\u{2CEAF}\u{2CEB0}-\u{2EBEF}\u{2F800}-\u{2FA1F}a-zA-Z0-9+#&\._%]+)").unwrap();
@@ -304,7 +303,7 @@ impl Jieba {
         }
         let logtotal = (self.total as f64).ln();
         for i in (0..word_count).rev() {
-            let pair = dag[&i]
+            let pair = dag[i]
                 .iter()
                 .map(|x| {
                     let byte_start = char_indices[i];
@@ -324,10 +323,9 @@ impl Jieba {
         route
     }
 
-    // FIXME: Use a proper DAG impl?
     fn dag(&self, sentence: &str, char_indices: &[usize]) -> DAG {
-        let mut dag = BTreeMap::new();
         let word_count = char_indices.len();
+        let mut dag = DAG::with_capacity(word_count);
         for (k, &byte_start) in char_indices.iter().enumerate() {
             let mut tmplist = SmallVec::new();
             let mut i = k;
@@ -367,7 +365,7 @@ impl Jieba {
         let dag = self.dag(sentence, &char_indices);
 
         let mut old_j = -1;
-        for (k, list) in dag.into_iter() {
+        for (k, list) in dag.into_iter().enumerate() {
             if list.len() == 1 && k as isize > old_j {
                 let byte_start = char_indices[k];
                 let end_index = list[0] + 1;
@@ -798,11 +796,11 @@ mod tests {
         let sentence = "网球拍卖会";
         let char_indices: Vec<usize> = sentence.char_indices().map(|x| x.0).collect();
         let dag = jieba.dag(sentence, &char_indices);
-        assert_eq!(dag[&0], SmallVec::from_buf([0, 1, 2]));
-        assert_eq!(dag[&1], SmallVec::from_buf([1, 2]));
-        assert_eq!(dag[&2], SmallVec::from_buf([2, 3, 4]));
-        assert_eq!(dag[&3], SmallVec::from_buf([3]));
-        assert_eq!(dag[&4], SmallVec::from_buf([4]));
+        assert_eq!(dag[0], SmallVec::from_buf([0, 1, 2]));
+        assert_eq!(dag[1], SmallVec::from_buf([1, 2]));
+        assert_eq!(dag[2], SmallVec::from_buf([2, 3, 4]));
+        assert_eq!(dag[3], SmallVec::from_buf([3]));
+        assert_eq!(dag[4], SmallVec::from_buf([4]));
     }
 
     #[test]
