@@ -39,11 +39,10 @@ fn viterbi(sentence: &str, char_indices: &[usize]) -> Vec<Status> {
 
     let states = [Status::B, Status::M, Status::E, Status::S];
     #[allow(non_snake_case)]
-
     let R = states.len();
     let C = char_indices.len();
-    let mut V = vec![0.0; R*C];
-    let mut prev: Vec<Option<Status>> = vec![None; R*C];
+    let mut V = vec![0.0; R * C];
+    let mut prev: Vec<Option<Status>> = vec![None; R * C];
 
     for y in &states {
         let first_word = &sentence[char_indices[0]..char_indices[1]];
@@ -80,7 +79,7 @@ fn viterbi(sentence: &str, char_indices: &[usize]) -> Vec<Status> {
     }
     let (_prob, state) = [Status::E, Status::S]
         .iter()
-        .map(|y| (V[(C-1) * R + (*y as usize)], y))
+        .map(|y| (V[(C - 1) * R + (*y as usize)], y))
         .max_by(|x, y| x.partial_cmp(y).unwrap_or(Ordering::Equal))
         .unwrap();
 
