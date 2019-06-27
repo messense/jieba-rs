@@ -470,7 +470,7 @@ impl Jieba {
                     if buf_indices.len() == 1 {
                         words.push(word);
                     } else if !self.dict.get(word).map(|x| x.0 > 0).unwrap_or(false) {
-                        words.extend(hmm::cut(word));
+                        hmm::cut(word, words);
                     } else {
                         let mut word_indices = word.char_indices().map(|x| x.0).peekable();
                         while let Some(byte_start) = word_indices.next() {
@@ -504,7 +504,7 @@ impl Jieba {
             if buf_indices.len() == 1 {
                 words.push(word);
             } else if !self.dict.get(word).map(|x| x.0 > 0).unwrap_or(false) {
-                words.extend(hmm::cut(word));
+                hmm::cut(word, words);
             } else {
                 let mut word_indices = word.char_indices().map(|x| x.0).peekable();
                 while let Some(byte_start) = word_indices.next() {
