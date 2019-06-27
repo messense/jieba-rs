@@ -298,7 +298,7 @@ impl Jieba {
     fn calc(&self, sentence: &str, char_indices: &[usize], dag: &DAG, route: &mut Vec<(f64, usize)>) {
         let word_count = char_indices.len();
 
-        if word_count + 1 > route.capacity() {
+        if word_count + 1 > route.len() {
             route.resize(word_count + 1, (0.0, 0));
         }
 
@@ -329,7 +329,7 @@ impl Jieba {
     fn dag(&self, sentence: &str, char_indices: &[usize], dag: &mut DAG) {
         let word_count = char_indices.len();
 
-        if word_count > dag.capacity() {
+        if word_count > dag.len() {
             dag.resize(word_count, SmallVec::new());
         }
 
