@@ -80,14 +80,14 @@ pub use crate::keywords::textrank::TextRank;
 pub use crate::keywords::tfidf::TFIDF;
 #[cfg(any(feature = "tfidf", feature = "textrank"))]
 pub use crate::keywords::KeywordExtract;
+use crate::dag::DAG;
 
+mod dag;
 mod hmm;
 #[cfg(any(feature = "tfidf", feature = "textrank"))]
 mod keywords;
 
 static DEFAULT_DICT: &str = include_str!("data/dict.txt");
-
-type DAG = Vec<SmallVec<[usize; 5]>>;
 
 lazy_static! {
     static ref RE_HAN_DEFAULT: Regex = Regex::new(r"([\u{3400}-\u{4DBF}\u{4E00}-\u{9FFF}\u{F900}-\u{FAFF}\u{20000}-\u{2A6DF}\u{2A700}-\u{2B73F}\u{2B740}-\u{2B81F}\u{2B820}-\u{2CEAF}\u{2CEB0}-\u{2EBEF}\u{2F800}-\u{2FA1F}a-zA-Z0-9+#&\._%]+)").unwrap();
