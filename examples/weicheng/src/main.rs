@@ -12,5 +12,5 @@ fn main() {
             let _ = jieba.cut(line, true);
         }
     }
-    println!("{}", now.elapsed().as_secs());
+    println!("{}ms", now.elapsed().as_millis());
 }
