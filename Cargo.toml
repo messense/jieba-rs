@@ -40,5 +40,6 @@ all-features = true
 [workspace]
 members = [
     ".",
+    "capi",
     "examples/weicheng"
 ]
