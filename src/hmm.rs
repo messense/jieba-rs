@@ -33,18 +33,22 @@ include!(concat!(env!("OUT_DIR"), "/hmm_prob.rs"));
 
 const MIN_FLOAT: f64 = -3.14e100;
 
+#[allow(non_snake_case)]
 fn viterbi(sentence: &str, char_indices: &[usize]) -> Vec<Status> {
     assert!(char_indices.len() > 1);
 
     let states = [Status::B, Status::M, Status::E, Status::S];
     #[allow(non_snake_case)]
-    let mut V = vec![vec![0.0; states.len()]; char_indices.len()];
-    let mut prev: Vec<Vec<Option<Status>>> = vec![vec![None; char_indices.len()]; states.len()];
+
+    let R = states.len();
+    let C = char_indices.len();
+    let mut V = vec![0.0; R*C];
+    let mut prev: Vec<Option<Status>> = vec![None; R*C];
 
     for y in &states {
         let first_word = &sentence[char_indices[0]..char_indices[1]];
         let prob = INITIAL_PROBS[*y as usize] + EMIT_PROBS[*y as usize].get(first_word).cloned().unwrap_or(MIN_FLOAT);
-        V[0][*y as usize] = prob;
+        V[*y as usize] = prob;
     }
 
     for t in 1..char_indices.len() {
@@ -61,7 +65,7 @@ fn viterbi(sentence: &str, char_indices: &[usize]) -> Vec<Status> {
                 .iter()
                 .map(|y0| {
                     (
-                        V[t - 1][*y0 as usize]
+                        V[(t - 1) * R + (*y0 as usize)]
                             + TRANS_PROBS[*y0 as usize].get(*y as usize).cloned().unwrap_or(MIN_FLOAT)
                             + em_prob,
                         *y0,
@@ -69,13 +73,14 @@ fn viterbi(sentence: &str, char_indices: &[usize]) -> Vec<Status> {
                 })
                 .max_by(|x, y| x.partial_cmp(y).unwrap_or(Ordering::Equal))
                 .unwrap();
-            V[t][*y as usize] = prob;
-            prev[*y as usize][t] = Some(state);
+            let idx = (t * R) + (*y as usize);
+            V[idx] = prob;
+            prev[idx] = Some(state);
         }
     }
     let (_prob, state) = [Status::E, Status::S]
         .iter()
-        .map(|y| (V[char_indices.len() - 1][*y as usize], y))
+        .map(|y| (V[(C-1) * R + (*y as usize)], y))
         .max_by(|x, y| x.partial_cmp(y).unwrap_or(Ordering::Equal))
         .unwrap();
 
@@ -84,7 +89,7 @@ fn viterbi(sentence: &str, char_indices: &[usize]) -> Vec<Status> {
     let mut curr = *state;
 
     best_path[t] = *state;
-    while let Some(p) = prev[curr as usize][t] {
+    while let Some(p) = prev[t * R + (curr as usize)] {
         assert!(t > 0);
         best_path[t - 1] = p;
         curr = p;
@@ -94,11 +99,10 @@ fn viterbi(sentence: &str, char_indices: &[usize]) -> Vec<Status> {
     best_path
 }
 
-fn cut_internal(sentence: &str, char_indices: Vec<usize>) -> Vec<&str> {
+fn cut_internal<'a>(sentence: &'a str, char_indices: Vec<usize>, words: &mut Vec<&'a str>) {
     let path = viterbi(sentence, &char_indices);
     let mut begin = 0;
     let mut next_i = 0;
-    let mut words = Vec::with_capacity(char_indices.len() / 2);
     for i in 0..char_indices.len() {
         let state = path[i];
         match state {
@@ -130,11 +134,9 @@ fn cut_internal(sentence: &str, char_indices: Vec<usize>) -> Vec<&str> {
         let byte_start = char_indices[next_i];
         words.push(&sentence[byte_start..]);
     }
-    words
 }
 
-pub fn cut(sentence: &str) -> Vec<&str> {
-    let mut words = Vec::new();
+pub fn cut<'a>(sentence: &'a str, words: &mut Vec<&'a str>) {
     let splitter = SplitMatches::new(&RE_HAN, sentence);
     for state in splitter {
         let block = state.into_str();
@@ -144,7 +146,7 @@ pub fn cut(sentence: &str) -> Vec<&str> {
         if RE_HAN.is_match(block) {
             if block.chars().count() > 1 {
                 let char_indices: Vec<usize> = block.char_indices().map(|x| x.0).collect();
-                words.extend(cut_internal(block, char_indices));
+                cut_internal(block, char_indices, words);
             } else {
                 words.push(block);
             }
@@ -159,7 +161,6 @@ pub fn cut(sentence: &str) -> Vec<&str> {
             }
         }
     }
-    words
 }
 
 #[cfg(test)]
@@ -179,7 +180,8 @@ mod tests {
     #[test]
     fn test_hmm_cut() {
         let sentence = "小明硕士毕业于中国科学院计算所";
-        let words = cut(sentence);
+        let mut words = Vec::with_capacity(sentence.chars().count() / 2);
+        cut(sentence, &mut words);
         assert_eq!(
             words,
             vec!["小明", "硕士", "毕业于", "中国", "科学院", "计算", "所"]
