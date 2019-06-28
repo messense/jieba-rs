@@ -25,7 +25,7 @@ script:
   - cargo build
   - cargo build --features tfidf
   - cargo build --features textrank
-  - cargo build --all-features
+  - cargo build --all-features --all
   - cargo test --all-features
   - |
     if [[ "$TRAVIS_OS_NAME" == "linux" && "$TRAVIS_RUST_VERSION" == "stable" ]]; then
