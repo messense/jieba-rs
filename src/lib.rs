@@ -304,6 +304,7 @@ impl Jieba {
         }
 
         let logtotal = (self.total as f64).ln();
+        let mut prev_byte_start = str_len;
         let curr = sentence.char_indices().map(|x| x.0).rev();
         for byte_start in curr {
             let pair = dag[byte_start]
@@ -319,7 +320,22 @@ impl Jieba {
                     ((freq as f64).ln() - logtotal + route[byte_end].0, byte_end)
                 })
                 .max_by(|x, y| x.partial_cmp(y).unwrap_or(Ordering::Equal));
-            route[byte_start] = pair.unwrap();
+
+            if let Some(p) = pair {
+                route[byte_start] = p;
+            } else {
+                let byte_end = prev_byte_start;
+                let wfrag = if byte_end == str_len {
+                    &sentence[byte_start..]
+                } else {
+                    &sentence[byte_start..byte_end]
+                };
+
+                let freq = self.dict.get(wfrag).map(|x| x.0).unwrap_or(1);
+                route[byte_start] = ((freq as f64).ln() - logtotal + route[byte_end].0, byte_end);
+            }
+
+            prev_byte_start = byte_start;
         }
     }
 
@@ -352,17 +368,9 @@ impl Jieba {
                 }
             }
 
-            if tmplist.is_empty() {
-                let byte_end = if let Some((next, _)) = curr.peek() {
-                    *next
-                } else {
-                    str_len
-                };
-
-                tmplist.push(byte_end);
+            if !tmplist.is_empty() {
+                dag[byte_start] = tmplist;
             }
-
-            dag[byte_start] = tmplist;
         }
     }
 
@@ -388,7 +396,6 @@ impl Jieba {
     fn cut_dag_no_hmm<'a>(
         &self,
         sentence: &'a str,
-        buf_indices: &mut Vec<usize>,
         words: &mut Vec<&'a str>,
         route: &mut Vec<(f64, usize)>,
         dag: &mut DAG,
@@ -396,6 +403,7 @@ impl Jieba {
         self.dag(sentence, dag);
         self.calc(sentence, dag, route);
         let mut x = 0;
+        let mut left: Option<usize> = None;
 
         while x < sentence.len() {
             let y = route[x].1;
@@ -406,14 +414,14 @@ impl Jieba {
             };
 
             if l_str.chars().count() == 1 && l_str.chars().all(|ch| ch.is_ascii_alphanumeric()) {
-                buf_indices.push(x);
+                if left.is_none() {
+                    left = Some(x);
+                }
             } else {
-                if !buf_indices.is_empty() {
-                    let byte_start = buf_indices[0];
+                if let Some(byte_start) = left {
                     let word = &sentence[byte_start..x];
-
                     words.push(word);
-                    buf_indices.clear();
+                    left = None;
                 }
 
                 let word = if y < sentence.len() {
@@ -427,11 +435,9 @@ impl Jieba {
             x = y;
         }
 
-        if !buf_indices.is_empty() {
-            let byte_start = buf_indices[0];
+        if let Some(byte_start) = left {
             let word = &sentence[byte_start..];
             words.push(word);
-            buf_indices.clear();
         }
 
         dag.clear();
@@ -441,7 +447,6 @@ impl Jieba {
     fn cut_dag_hmm<'a>(
         &self,
         sentence: &'a str,
-        buf_indices: &mut Vec<usize>,
         words: &mut Vec<&'a str>,
         route: &mut Vec<(f64, usize)>,
         dag: &mut DAG,
@@ -449,15 +454,17 @@ impl Jieba {
         self.dag(sentence, dag);
         self.calc(sentence, dag, route);
         let mut x = 0;
+        let mut left: Option<usize> = None;
 
         while x < sentence.len() {
             let y = route[x].1;
 
             if sentence[x..y].chars().count() == 1 {
-                buf_indices.push(x);
+                if left.is_none() {
+                    left = Some(x);
+                }
             } else {
-                if !buf_indices.is_empty() {
-                    let byte_start = buf_indices[0];
+                if let Some(byte_start) = left {
                     let byte_end = x;
                     let word = if byte_end < sentence.len() {
                         &sentence[byte_start..byte_end]
@@ -465,7 +472,7 @@ impl Jieba {
                         &sentence[byte_start..]
                     };
 
-                    if buf_indices.len() == 1 {
+                    if word.chars().count() == 1 {
                         words.push(word);
                     } else if !self.dict.get(word).map(|x| x.0 > 0).unwrap_or(false) {
                         hmm::cut(word, words);
@@ -479,7 +486,7 @@ impl Jieba {
                             }
                         }
                     }
-                    buf_indices.clear();
+                    left = None;
                 }
                 let word = if y < sentence.len() {
                     &sentence[x..y]
@@ -491,11 +498,10 @@ impl Jieba {
             x = y;
         }
 
-        if !buf_indices.is_empty() {
-            let byte_start = buf_indices[0];
+        if let Some(byte_start) = left {
             let word = &sentence[byte_start..];
 
-            if buf_indices.len() == 1 {
+            if word.chars().count() == 1 {
                 words.push(word);
             } else if !self.dict.get(word).map(|x| x.0 > 0).unwrap_or(false) {
                 hmm::cut(word, words);
@@ -509,7 +515,6 @@ impl Jieba {
                     }
                 }
             }
-            buf_indices.clear();
         }
 
         dag.clear();
@@ -522,7 +527,6 @@ impl Jieba {
         let re_han: &Regex = if cut_all { &*RE_HAN_CUT_ALL } else { &*RE_HAN_DEFAULT };
         let re_skip: &Regex = if cut_all { &*RE_SKIP_CUT_ALL } else { &*RE_SKIP_DEAFULT };
         let splitter = SplitMatches::new(&re_han, sentence);
-        let mut buf_indices = Vec::with_capacity(heuristic_capacity);
         let mut route = Vec::with_capacity(heuristic_capacity);
         let mut dag = Vec::with_capacity(heuristic_capacity);
 
@@ -535,9 +539,9 @@ impl Jieba {
                     if cut_all {
                         self.cut_all_internal(block, &mut words);
                     } else if hmm {
-                        self.cut_dag_hmm(block, &mut buf_indices, &mut words, &mut route, &mut dag);
+                        self.cut_dag_hmm(block, &mut words, &mut route, &mut dag);
                     } else {
-                        self.cut_dag_no_hmm(block, &mut buf_indices, &mut words, &mut route, &mut dag);
+                        self.cut_dag_no_hmm(block, &mut words, &mut route, &mut dag);
                     }
                 }
                 SplitState::Unmatched(_) => {
