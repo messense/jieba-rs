@@ -34,7 +34,7 @@ include!(concat!(env!("OUT_DIR"), "/hmm_prob.rs"));
 const MIN_FLOAT: f64 = -3.14e100;
 
 #[allow(non_snake_case)]
-fn viterbi(sentence: &str) -> Vec<Status> {
+fn viterbi(sentence: &str, V: &mut Vec<f64>, prev: &mut Vec<Option<Status>>) -> Vec<Status> {
     let str_len = sentence.len();
     let states = [Status::B, Status::M, Status::E, Status::S];
     #[allow(non_snake_case)]
@@ -42,8 +42,13 @@ fn viterbi(sentence: &str) -> Vec<Status> {
     let C = sentence.chars().count();
     assert!(C > 1);
 
-    let mut V = vec![0.0; R * C];
-    let mut prev: Vec<Option<Status>> = vec![None; R * C];
+    if prev.len() < R * C {
+        prev.resize(R * C, None);
+    }
+
+    if V.len() < R * C {
+        V.resize(R * C, 0.0);
+    }
 
     let mut curr = sentence.char_indices().map(|x| x.0).peekable();
     let x1 = curr.next().unwrap();
@@ -98,12 +103,16 @@ fn viterbi(sentence: &str) -> Vec<Status> {
         t -= 1;
     }
 
+    prev.clear();
+    V.clear();
+
     best_path
 }
 
-fn cut_internal<'a>(sentence: &'a str, words: &mut Vec<&'a str>) {
+#[allow(non_snake_case)]
+pub fn cut_internal<'a>(sentence: &'a str, words: &mut Vec<&'a str>, V: &mut Vec<f64>, prev: &mut Vec<Option<Status>>) {
     let str_len = sentence.len();
-    let path = viterbi(sentence);
+    let path = viterbi(sentence, V, prev);
     let mut begin = 0;
     let mut next_byte_offset = 0;
     let mut i = 0;
@@ -137,7 +146,13 @@ fn cut_internal<'a>(sentence: &'a str, words: &mut Vec<&'a str>) {
     }
 }
 
-pub fn cut<'a>(sentence: &'a str, words: &mut Vec<&'a str>) {
+#[allow(non_snake_case)]
+pub(crate) fn cut_with_allocated_memory<'a>(
+    sentence: &'a str,
+    words: &mut Vec<&'a str>,
+    V: &mut Vec<f64>,
+    prev: &mut Vec<Option<Status>>,
+) {
     let splitter = SplitMatches::new(&RE_HAN, sentence);
     for state in splitter {
         let block = state.into_str();
@@ -146,7 +161,7 @@ pub fn cut<'a>(sentence: &'a str, words: &mut Vec<&'a str>) {
         }
         if RE_HAN.is_match(block) {
             if block.chars().count() > 1 {
-                cut_internal(block, words);
+                cut_internal(block, words, V, prev);
             } else {
                 words.push(block);
             }
@@ -163,16 +178,33 @@ pub fn cut<'a>(sentence: &'a str, words: &mut Vec<&'a str>) {
     }
 }
 
+#[allow(non_snake_case)]
+pub fn cut<'a>(sentence: &'a str, words: &mut Vec<&'a str>) {
+    let R = 4;
+    let C = sentence.chars().count();
+    let mut V = vec![0.0; R * C];
+    let mut prev: Vec<Option<Status>> = vec![None; R * C];
+
+    cut_with_allocated_memory(sentence, words, &mut V, &mut prev);
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{cut, viterbi};
+    use super::{cut, viterbi, Status};
 
     #[test]
+    #[allow(non_snake_case)]
     fn test_viterbi() {
         use super::Status::*;
 
         let sentence = "小明硕士毕业于中国科学院计算所";
-        let path = viterbi(sentence);
+
+        let R = 4;
+        let C = sentence.chars().count();
+        let mut V = vec![0.0; R * C];
+        let mut prev: Vec<Option<Status>> = vec![None; R * C];
+
+        let path = viterbi(sentence, &mut V, &mut prev);
         assert_eq!(path, vec![B, E, B, E, B, M, E, B, E, B, M, E, B, E, S]);
     }
 

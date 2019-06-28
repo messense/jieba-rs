@@ -444,12 +444,15 @@ impl Jieba {
         route.clear();
     }
 
+    #[allow(non_snake_case)]
     fn cut_dag_hmm<'a>(
         &self,
         sentence: &'a str,
         words: &mut Vec<&'a str>,
         route: &mut Vec<(f64, usize)>,
         dag: &mut DAG,
+        V: &mut Vec<f64>,
+        prev: &mut Vec<Option<hmm::Status>>,
     ) {
         self.dag(sentence, dag);
         self.calc(sentence, dag, route);
@@ -475,7 +478,7 @@ impl Jieba {
                     if word.chars().count() == 1 {
                         words.push(word);
                     } else if !self.dict.get(word).map(|x| x.0 > 0).unwrap_or(false) {
-                        hmm::cut(word, words);
+                        hmm::cut_with_allocated_memory(word, words, V, prev);
                     } else {
                         let mut word_indices = word.char_indices().map(|x| x.0).peekable();
                         while let Some(byte_start) = word_indices.next() {
@@ -521,6 +524,7 @@ impl Jieba {
         route.clear();
     }
 
+    #[allow(non_snake_case)]
     fn cut_internal<'a>(&self, sentence: &'a str, cut_all: bool, hmm: bool) -> Vec<&'a str> {
         let heuristic_capacity = sentence.len() / 2;
         let mut words = Vec::with_capacity(heuristic_capacity);
@@ -529,6 +533,11 @@ impl Jieba {
         let splitter = SplitMatches::new(&re_han, sentence);
         let mut route = Vec::with_capacity(heuristic_capacity);
         let mut dag = Vec::with_capacity(heuristic_capacity);
+
+        let R = 4;
+        let C = sentence.chars().count();
+        let mut V = if hmm { vec![0.0; R * C] } else { Vec::new() };
+        let mut prev: Vec<Option<hmm::Status>> = if hmm { vec![None; R * C] } else { Vec::new() };
 
         for state in splitter {
             match state {
@@ -539,7 +548,7 @@ impl Jieba {
                     if cut_all {
                         self.cut_all_internal(block, &mut words);
                     } else if hmm {
-                        self.cut_dag_hmm(block, &mut words, &mut route, &mut dag);
+                        self.cut_dag_hmm(block, &mut words, &mut route, &mut dag, &mut V, &mut prev);
                     } else {
                         self.cut_dag_no_hmm(block, &mut words, &mut route, &mut dag);
                     }
