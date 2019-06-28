@@ -295,108 +295,92 @@ impl Jieba {
         std::cmp::max((logfreq + logtotal).exp() as usize + 1, self.get_word_freq(segment, 1))
     }
 
-    fn calc(&self, sentence: &str, char_indices: &[usize], dag: &DAG, route: &mut Vec<(f64, usize)>) {
-        let word_count = char_indices.len();
+    #[allow(clippy::ptr_arg)]
+    fn calc(&self, sentence: &str, dag: &DAG, route: &mut Vec<(f64, usize)>) {
+        let str_len = sentence.len();
 
-        if word_count + 1 > route.len() {
-            route.resize(word_count + 1, (0.0, 0));
+        if str_len + 1 > route.len() {
+            route.resize(str_len + 1, (0.0, 0));
         }
 
-        for _ in 0..=word_count {
-            route.push((0.0, 0));
-        }
         let logtotal = (self.total as f64).ln();
-        for i in (0..word_count).rev() {
-            let pair = dag[i]
+        let curr = sentence.char_indices().map(|x| x.0).rev();
+        for byte_start in curr {
+            let pair = dag[byte_start]
                 .iter()
-                .map(|x| {
-                    let byte_start = char_indices[i];
-                    let end_index = x + 1;
-                    let byte_end = if end_index < char_indices.len() {
-                        char_indices[end_index]
+                .map(|&byte_end| {
+                    let wfrag = if byte_end == str_len {
+                        &sentence[byte_start..]
                     } else {
-                        sentence.len()
+                        &sentence[byte_start..byte_end]
                     };
-                    let wfrag = &sentence[byte_start..byte_end];
+
                     let freq = self.dict.get(wfrag).map(|x| x.0).unwrap_or(1);
-                    ((freq as f64).ln() - logtotal + route[x + 1].0, *x)
+                    ((freq as f64).ln() - logtotal + route[byte_end].0, byte_end)
                 })
                 .max_by(|x, y| x.partial_cmp(y).unwrap_or(Ordering::Equal));
-            route[i] = pair.unwrap();
+            route[byte_start] = pair.unwrap();
         }
     }
 
-    fn dag(&self, sentence: &str, char_indices: &[usize], dag: &mut DAG) {
-        let word_count = char_indices.len();
+    fn dag(&self, sentence: &str, dag: &mut DAG) {
+        let str_len = sentence.len();
 
-        if word_count > dag.len() {
-            dag.resize(word_count, SmallVec::new());
+        if str_len > dag.len() {
+            dag.resize(str_len, SmallVec::new());
         }
 
-        for (k, &byte_start) in char_indices.iter().enumerate() {
+        let mut curr = sentence.char_indices().peekable();
+        while let Some((byte_start, _)) = curr.next() {
             let mut tmplist = SmallVec::new();
-            let mut i = k;
-            let mut wfrag = if k + 1 < char_indices.len() {
-                &sentence[byte_start..char_indices[k + 1]]
-            } else {
-                &sentence[byte_start..]
-            };
+            let mut next = curr.clone();
 
-            let upper_bound = std::cmp::min(word_count, k + self.longest_word_len);
-            while i < upper_bound {
+            while let Some((byte_end, _)) = next.next() {
+                let wfrag = &sentence[byte_start..byte_end];
                 if let Some(freq) = self.dict.get(wfrag).map(|x| x.0) {
                     if freq > 0 {
-                        tmplist.push(i);
+                        tmplist.push(byte_end);
                     }
-                    i += 1;
-                    wfrag = if i + 1 < word_count {
-                        let byte_end = char_indices[i + 1];
-                        &sentence[byte_start..byte_end]
-                    } else {
-                        &sentence[byte_start..]
-                    };
                 } else {
                     break;
                 }
             }
-            if tmplist.is_empty() {
-                tmplist.push(k);
+
+            if let Some(freq) = self.dict.get(&sentence[byte_start..]).map(|x| x.0) {
+                if freq > 0 {
+                    tmplist.push(str_len);
+                }
             }
-            dag.insert(k, tmplist);
+
+            if tmplist.is_empty() {
+                let byte_end = if let Some((next, _)) = curr.peek() {
+                    *next
+                } else {
+                    str_len
+                };
+
+                tmplist.push(byte_end);
+            }
+
+            dag[byte_start] = tmplist;
         }
     }
 
     fn cut_all_internal<'a>(&self, sentence: &'a str, words: &mut Vec<&'a str>) {
-        let char_indices: Vec<usize> = sentence.char_indices().map(|x| x.0).collect();
-        let mut dag = Vec::with_capacity(char_indices.len());
-        self.dag(sentence, &char_indices, &mut dag);
+        let str_len = sentence.len();
+        let mut dag = Vec::with_capacity(sentence.len());
+        self.dag(sentence, &mut dag);
 
-        let mut old_j = -1;
-        for (k, list) in dag.into_iter().enumerate() {
-            if list.len() == 1 && k as isize > old_j {
-                let byte_start = char_indices[k];
-                let end_index = list[0] + 1;
-                let byte_end = if end_index < char_indices.len() {
-                    char_indices[end_index]
+        let curr = sentence.char_indices().map(|x| x.0);
+        for byte_start in curr {
+            for byte_end in &dag[byte_start] {
+                let word = if *byte_end == str_len {
+                    &sentence[byte_start..]
                 } else {
-                    sentence.len()
+                    &sentence[byte_start..*byte_end]
                 };
-                words.push(&sentence[byte_start..byte_end]);
-                old_j = list[0] as isize;
-            } else {
-                for j in list.into_iter() {
-                    if j > k {
-                        let byte_start = char_indices[k];
-                        let end_index = j + 1;
-                        let byte_end = if end_index < char_indices.len() {
-                            char_indices[end_index]
-                        } else {
-                            sentence.len()
-                        };
-                        words.push(&sentence[byte_start..byte_end]);
-                        old_j = j as isize;
-                    }
-                }
+
+                words.push(word)
             }
         }
     }
@@ -409,52 +393,43 @@ impl Jieba {
         route: &mut Vec<(f64, usize)>,
         dag: &mut DAG,
     ) {
-        let char_indices: Vec<usize> = sentence.char_indices().map(|x| x.0).collect();
-        self.dag(sentence, &char_indices, dag);
-        self.calc(sentence, &char_indices, dag, route);
+        self.dag(sentence, dag);
+        self.calc(sentence, dag, route);
         let mut x = 0;
 
-        while x < char_indices.len() {
-            let y = route[x].1 + 1;
-            let l_indices = &char_indices[x..y];
-            let l_str = if y < char_indices.len() {
-                &sentence[char_indices[x]..char_indices[y]]
+        while x < sentence.len() {
+            let y = route[x].1;
+            let l_str = if y < sentence.len() {
+                &sentence[x..y]
             } else {
-                &sentence[char_indices[x]..]
+                &sentence[x..]
             };
-            if l_indices.len() == 1 && l_str.chars().all(|ch| ch.is_ascii_alphanumeric()) {
+
+            if l_str.chars().count() == 1 && l_str.chars().all(|ch| ch.is_ascii_alphanumeric()) {
                 buf_indices.push(x);
             } else {
                 if !buf_indices.is_empty() {
-                    let byte_start = char_indices[buf_indices[0]];
-                    let end_index = buf_indices[buf_indices.len() - 1] + 1;
-                    let word = if end_index < char_indices.len() {
-                        let byte_end = char_indices[end_index];
-                        &sentence[byte_start..byte_end]
-                    } else {
-                        &sentence[byte_start..]
-                    };
+                    let byte_start = buf_indices[0];
+                    let word = &sentence[byte_start..x];
+
                     words.push(word);
                     buf_indices.clear();
                 }
-                let word = if y < char_indices.len() {
-                    &sentence[char_indices[x]..char_indices[y]]
+
+                let word = if y < sentence.len() {
+                    &sentence[x..y]
                 } else {
-                    &sentence[char_indices[x]..]
+                    &sentence[x..]
                 };
+
                 words.push(word);
             }
             x = y;
         }
+
         if !buf_indices.is_empty() {
-            let byte_start = char_indices[buf_indices[0]];
-            let end_index = buf_indices[buf_indices.len() - 1] + 1;
-            let word = if end_index < char_indices.len() {
-                let byte_end = char_indices[end_index];
-                &sentence[byte_start..byte_end]
-            } else {
-                &sentence[byte_start..]
-            };
+            let byte_start = buf_indices[0];
+            let word = &sentence[byte_start..];
             words.push(word);
             buf_indices.clear();
         }
@@ -471,26 +446,25 @@ impl Jieba {
         route: &mut Vec<(f64, usize)>,
         dag: &mut DAG,
     ) {
-        let char_indices: Vec<usize> = sentence.char_indices().map(|x| x.0).collect();
-        self.dag(sentence, &char_indices, dag);
-        self.calc(sentence, &char_indices, dag, route);
+        self.dag(sentence, dag);
+        self.calc(sentence, dag, route);
         let mut x = 0;
 
-        while x < char_indices.len() {
-            let y = route[x].1 + 1;
-            let l_indices = &char_indices[x..y];
-            if l_indices.len() == 1 {
+        while x < sentence.len() {
+            let y = route[x].1;
+
+            if sentence[x..y].chars().count() == 1 {
                 buf_indices.push(x);
             } else {
                 if !buf_indices.is_empty() {
-                    let byte_start = char_indices[buf_indices[0]];
-                    let end_index = buf_indices[buf_indices.len() - 1] + 1;
-                    let word = if end_index < char_indices.len() {
-                        let byte_end = char_indices[end_index];
+                    let byte_start = buf_indices[0];
+                    let byte_end = x;
+                    let word = if byte_end < sentence.len() {
                         &sentence[byte_start..byte_end]
                     } else {
                         &sentence[byte_start..]
                     };
+
                     if buf_indices.len() == 1 {
                         words.push(word);
                     } else if !self.dict.get(word).map(|x| x.0 > 0).unwrap_or(false) {
@@ -507,24 +481,20 @@ impl Jieba {
                     }
                     buf_indices.clear();
                 }
-                let word = if y < char_indices.len() {
-                    &sentence[char_indices[x]..char_indices[y]]
+                let word = if y < sentence.len() {
+                    &sentence[x..y]
                 } else {
-                    &sentence[char_indices[x]..]
+                    &sentence[x..]
                 };
                 words.push(word);
             }
             x = y;
         }
+
         if !buf_indices.is_empty() {
-            let byte_start = char_indices[buf_indices[0]];
-            let end_index = buf_indices[buf_indices.len() - 1] + 1;
-            let word = if end_index < char_indices.len() {
-                let byte_end = char_indices[end_index];
-                &sentence[byte_start..byte_end]
-            } else {
-                &sentence[byte_start..]
-            };
+            let byte_start = buf_indices[0];
+            let word = &sentence[byte_start..];
+
             if buf_indices.len() == 1 {
                 words.push(word);
             } else if !self.dict.get(word).map(|x| x.0 > 0).unwrap_or(false) {
@@ -547,7 +517,7 @@ impl Jieba {
     }
 
     fn cut_internal<'a>(&self, sentence: &'a str, cut_all: bool, hmm: bool) -> Vec<&'a str> {
-        let heuristic_capacity = sentence.chars().count() / 2;
+        let heuristic_capacity = sentence.len() / 2;
         let mut words = Vec::with_capacity(heuristic_capacity);
         let re_han: &Regex = if cut_all { &*RE_HAN_CUT_ALL } else { &*RE_HAN_DEFAULT };
         let re_skip: &Regex = if cut_all { &*RE_SKIP_CUT_ALL } else { &*RE_SKIP_DEAFULT };
@@ -823,14 +793,13 @@ mod tests {
     fn test_dag() {
         let jieba = Jieba::new();
         let sentence = "网球拍卖会";
-        let char_indices: Vec<usize> = sentence.char_indices().map(|x| x.0).collect();
         let mut dag = DAG::new();
-        jieba.dag(sentence, &char_indices, &mut dag);
-        assert_eq!(dag[0], SmallVec::from_buf([0, 1, 2]));
-        assert_eq!(dag[1], SmallVec::from_buf([1, 2]));
-        assert_eq!(dag[2], SmallVec::from_buf([2, 3, 4]));
-        assert_eq!(dag[3], SmallVec::from_buf([3]));
-        assert_eq!(dag[4], SmallVec::from_buf([4]));
+        jieba.dag(sentence, &mut dag);
+        assert_eq!(dag[0], SmallVec::from_buf([3, 6, 9]));
+        assert_eq!(dag[3], SmallVec::from_buf([6, 9]));
+        assert_eq!(dag[6], SmallVec::from_buf([9, 12, 15]));
+        assert_eq!(dag[9], SmallVec::from_buf([12]));
+        assert_eq!(dag[12], SmallVec::from_buf([15]));
     }
 
     #[test]
@@ -839,7 +808,20 @@ mod tests {
         let words = jieba.cut_all("abc网球拍卖会def");
         assert_eq!(
             words,
-            vec!["abc", "网球", "网球拍", "球拍", "拍卖", "拍卖会", "def"]
+            vec![
+                "abc",
+                "网",
+                "网球",
+                "网球拍",
+                "球",
+                "球拍",
+                "拍",
+                "拍卖",
+                "拍卖会",
+                "卖",
+                "会",
+                "def"
+            ]
         );
     }
 
