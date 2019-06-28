@@ -207,7 +207,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 name = "jieba-capi"
 version = "0.1.0"
 dependencies = [
- "jieba-rs 0.4.2",
+ "jieba-rs 0.4.3",
 ]
 
 [[package]]
