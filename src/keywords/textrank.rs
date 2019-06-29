@@ -66,6 +66,10 @@ impl StateDiagram {
     }
 }
 
+/// Text rank keywords extraction
+///
+/// Requires `textrank` feature to be enabled
+#[derive(Debug)]
 pub struct TextRank<'a> {
     jieba: &'a Jieba,
     span: usize,

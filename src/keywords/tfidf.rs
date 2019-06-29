@@ -25,6 +25,9 @@ impl<'a> PartialOrd for HeapNode<'a> {
     }
 }
 
+/// TF-IDF keywords extraction
+///
+/// Require `tfidf` feature to be enabled
 #[derive(Debug)]
 pub struct TFIDF<'a> {
     jieba: &'a Jieba,

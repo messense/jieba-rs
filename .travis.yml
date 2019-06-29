@@ -22,6 +22,7 @@ before_script:
 
 script:
   - cargo fmt --all -- --check
+  - cargo build --no-default-features
   - cargo build
   - cargo build --features tfidf
   - cargo build --features textrank

@@ -69,7 +69,7 @@
 use lazy_static::lazy_static;
 
 use std::cmp::Ordering;
-use std::io::{self, BufRead, BufReader};
+use std::io::{self, BufRead};
 
 use regex::{Match, Matches, Regex};
 use smallvec::SmallVec;
@@ -85,6 +85,7 @@ mod hmm;
 #[cfg(any(feature = "tfidf", feature = "textrank"))]
 mod keywords;
 
+#[cfg(feature = "default-dict")]
 static DEFAULT_DICT: &str = include_str!("data/dict.txt");
 
 type DAG = Vec<SmallVec<[usize; 5]>>;
@@ -199,6 +200,7 @@ pub struct Jieba {
     longest_word_len: usize,
 }
 
+#[cfg(feature = "default-dict")]
 impl Default for Jieba {
     fn default() -> Self {
         Jieba::new()
@@ -216,9 +218,12 @@ impl Jieba {
     }
 
     /// Create a new instance with embed dict
+    ///
+    /// Requires `default-dict` feature to be enabled.
+    #[cfg(feature = "default-dict")]
     pub fn new() -> Self {
         let mut instance = Self::empty();
-        let mut default_dict = BufReader::new(DEFAULT_DICT.as_bytes());
+        let mut default_dict = io::BufReader::new(DEFAULT_DICT.as_bytes());
         instance.load_dict(&mut default_dict).unwrap();
         instance
     }
