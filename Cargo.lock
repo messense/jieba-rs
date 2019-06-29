@@ -207,12 +207,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 name = "jieba-capi"
 version = "0.1.0"
 dependencies = [
- "jieba-rs 0.4.6",
+ "jieba-rs 0.4.7",
 ]
 
 [[package]]
 name = "jieba-rs"
-version = "0.4.6"
+version = "0.4.7"
 dependencies = [
  "criterion 0.2.11 (registry+https://github.com/rust-lang/crates.io-index)",
  "hashbrown 0.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -637,7 +637,7 @@ dependencies = [
 name = "weicheng"
 version = "0.1.0"
 dependencies = [
- "jieba-rs 0.4.6",
+ "jieba-rs 0.4.7",
 ]
 
 [[package]]
