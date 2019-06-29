@@ -34,7 +34,7 @@ include!(concat!(env!("OUT_DIR"), "/hmm_prob.rs"));
 const MIN_FLOAT: f64 = -3.14e100;
 
 #[allow(non_snake_case)]
-fn viterbi(sentence: &str, V: &mut Vec<f64>, prev: &mut Vec<Option<Status>>) -> Vec<Status> {
+fn viterbi(sentence: &str, V: &mut Vec<f64>, prev: &mut Vec<Option<Status>>, best_path: &mut Vec<Status>) {
     let str_len = sentence.len();
     let states = [Status::B, Status::M, Status::E, Status::S];
     #[allow(non_snake_case)]
@@ -48,6 +48,10 @@ fn viterbi(sentence: &str, V: &mut Vec<f64>, prev: &mut Vec<Option<Status>>) -> 
 
     if V.len() < R * C {
         V.resize(R * C, 0.0);
+    }
+
+    if best_path.len() < C {
+        best_path.resize(C, Status::B);
     }
 
     let mut curr = sentence.char_indices().map(|x| x.0).peekable();
@@ -91,7 +95,6 @@ fn viterbi(sentence: &str, V: &mut Vec<f64>, prev: &mut Vec<Option<Status>>) -> 
         .max_by(|x, y| x.partial_cmp(y).unwrap_or(Ordering::Equal))
         .unwrap();
 
-    let mut best_path: Vec<Status> = vec![Status::B; C];
     let mut t = C - 1;
     let mut curr = *state;
 
@@ -105,14 +108,18 @@ fn viterbi(sentence: &str, V: &mut Vec<f64>, prev: &mut Vec<Option<Status>>) -> 
 
     prev.clear();
     V.clear();
-
-    best_path
 }
 
 #[allow(non_snake_case)]
-pub fn cut_internal<'a>(sentence: &'a str, words: &mut Vec<&'a str>, V: &mut Vec<f64>, prev: &mut Vec<Option<Status>>) {
+pub fn cut_internal<'a>(
+    sentence: &'a str,
+    words: &mut Vec<&'a str>,
+    V: &mut Vec<f64>,
+    prev: &mut Vec<Option<Status>>,
+    path: &mut Vec<Status>,
+) {
     let str_len = sentence.len();
-    let path = viterbi(sentence, V, prev);
+    viterbi(sentence, V, prev, path);
     let mut begin = 0;
     let mut next_byte_offset = 0;
     let mut i = 0;
@@ -144,6 +151,8 @@ pub fn cut_internal<'a>(sentence: &'a str, words: &mut Vec<&'a str>, V: &mut Vec
         let byte_start = next_byte_offset;
         words.push(&sentence[byte_start..]);
     }
+
+    path.clear();
 }
 
 #[allow(non_snake_case)]
@@ -152,6 +161,7 @@ pub(crate) fn cut_with_allocated_memory<'a>(
     words: &mut Vec<&'a str>,
     V: &mut Vec<f64>,
     prev: &mut Vec<Option<Status>>,
+    path: &mut Vec<Status>,
 ) {
     let splitter = SplitMatches::new(&RE_HAN, sentence);
     for state in splitter {
@@ -161,7 +171,7 @@ pub(crate) fn cut_with_allocated_memory<'a>(
         }
         if RE_HAN.is_match(block) {
             if block.chars().count() > 1 {
-                cut_internal(block, words, V, prev);
+                cut_internal(block, words, V, prev, path);
             } else {
                 words.push(block);
             }
@@ -184,8 +194,9 @@ pub fn cut<'a>(sentence: &'a str, words: &mut Vec<&'a str>) {
     let C = sentence.chars().count();
     let mut V = vec![0.0; R * C];
     let mut prev: Vec<Option<Status>> = vec![None; R * C];
+    let mut path: Vec<Status> = vec![Status::B; C];
 
-    cut_with_allocated_memory(sentence, words, &mut V, &mut prev);
+    cut_with_allocated_memory(sentence, words, &mut V, &mut prev, &mut path);
 }
 
 #[cfg(test)]
@@ -203,8 +214,8 @@ mod tests {
         let C = sentence.chars().count();
         let mut V = vec![0.0; R * C];
         let mut prev: Vec<Option<Status>> = vec![None; R * C];
-
-        let path = viterbi(sentence, &mut V, &mut prev);
+        let mut path: Vec<Status> = vec![Status::B; C];
+        viterbi(sentence, &mut V, &mut prev, &mut path);
         assert_eq!(path, vec![B, E, B, E, B, M, E, B, E, B, M, E, B, E, S]);
     }
 
