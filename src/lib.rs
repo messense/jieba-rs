@@ -57,12 +57,13 @@
 //!
 //! ## Enabling Additional Features
 //!
+//! * `default-dict` feature enables embedded dictionary, this features is enabled by default
 //! * `tfidf` feature enables TF-IDF keywords extractor
 //! * `textrank` feature enables TextRank keywords extractor
 //!
 //! ```toml
 //! [dependencies]
-//! jieba-rs = { version = "0.3", features = ["tfidf", "textrank"] }
+//! jieba-rs = { version = "0.4", features = ["tfidf", "textrank"] }
 //! ```
 //!
 
