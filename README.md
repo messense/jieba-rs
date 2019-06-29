@@ -32,6 +32,7 @@ fn main() {
 
 ## Enabling Additional Features
 
+* `default-dict` feature enables embedded dictionary, this features is enabled by default
 * `tfidf` feature enables TF-IDF keywords extractor
 * `textrank` feature enables TextRank keywords extractor
 

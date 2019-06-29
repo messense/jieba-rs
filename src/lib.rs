@@ -85,6 +85,7 @@ mod hmm;
 #[cfg(any(feature = "tfidf", feature = "textrank"))]
 mod keywords;
 
+#[cfg(feature = "default-dict")]
 static DEFAULT_DICT: &str = include_str!("data/dict.txt");
 
 type DAG = Vec<SmallVec<[usize; 5]>>;
@@ -216,6 +217,9 @@ impl Jieba {
     }
 
     /// Create a new instance with embed dict
+    ///
+    /// Requires `default-dict` feature to be enabled.
+    #[cfg(feature = "default-dict")]
     pub fn new() -> Self {
         let mut instance = Self::empty();
         let mut default_dict = BufReader::new(DEFAULT_DICT.as_bytes());

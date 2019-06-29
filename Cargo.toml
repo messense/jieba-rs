@@ -30,7 +30,8 @@ hashbrown = "0.5.0"
 phf_codegen = "0.7"
 
 [features]
-default = []
+default = ["default-dict"]
+default-dict = []
 tfidf = []
 textrank = []
 
