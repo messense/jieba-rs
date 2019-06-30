@@ -9,13 +9,12 @@ use rand::Rng;
 use smallvec::SmallVec;
 use std::collections::btree_map::BTreeMap;
 
+#[global_allocator]
+static ALLOC: jemallocator::Jemalloc = jemallocator::Jemalloc;
+
 lazy_static! {
     static ref JIEBA: Jieba = Jieba::new();
-}
-lazy_static! {
     static ref TFIDF_EXTRACTOR: TFIDF<'static> = TFIDF::new_with_jieba(&JIEBA);
-}
-lazy_static! {
     static ref TEXTRANK_EXTRACTOR: TextRank<'static> = TextRank::new_with_jieba(&JIEBA);
 }
 

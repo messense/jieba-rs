@@ -1,6 +1,9 @@
 use jieba_rs::Jieba;
 use std::time;
 
+#[global_allocator]
+static ALLOC: jemallocator::Jemalloc = jemallocator::Jemalloc;
+
 static WEICHENG_TXT: &str = include_str!("weicheng.txt");
 
 fn main() {
