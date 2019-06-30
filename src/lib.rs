@@ -844,6 +844,31 @@ mod tests {
                 "def"
             ]
         );
+
+        // The cut_all from the python de-facto implementation is loosely defined,
+        // And the answer "我, 来到, 北京, 清华, 清华大学, 华大, 大学" from the python implementation looks weird since it drops the single character word even though it is part of the DAG candidates.
+        // For example, it includes "华大" but it doesn't include "清" and "学"
+        let words = jieba.cut_all("我来到北京清华大学");
+        assert_eq!(
+            words,
+            vec![
+                "我",
+                "来",
+                "来到",
+                "到",
+                "北",
+                "北京",
+                "京",
+                "清",
+                "清华",
+                "清华大学",
+                "华",
+                "华大",
+                "大",
+                "大学",
+                "学"
+            ]
+        );
     }
 
     #[test]
@@ -862,6 +887,12 @@ mod tests {
         assert_eq!(words, vec!["我们", "中出", "了", "一个", "叛徒"]);
         let words = jieba.cut("我们中出了一个叛徒👪", true);
         assert_eq!(words, vec!["我们", "中出", "了", "一个", "叛徒", "👪"]);
+
+        let words = jieba.cut("我来到北京清华大学", true);
+        assert_eq!(words, vec!["我", "来到", "北京", "清华大学"]);
+
+        let words = jieba.cut("他来到了网易杭研大厦", true);
+        assert_eq!(words, vec!["他", "来到", "了", "网易", "杭研", "大厦"]);
     }
 
     #[test]
@@ -880,6 +911,38 @@ mod tests {
         assert_eq!(
             words,
             vec!["南京", "京市", "南京市", "长江", "大桥", "长江大桥"]
+        );
+
+        let words = jieba.cut_for_search(
+            "小明硕士毕业于中国科学院计算所，后在日本京都大学深造",
+            true,
+        );
+
+        // The python implementation silently filtered "，". but we includes it here in the output
+        // to let the library user to decide their own filtering strategy
+        assert_eq!(
+            words,
+            vec![
+                "小明",
+                "硕士",
+                "毕业",
+                "于",
+                "中国",
+                "科学",
+                "学院",
+                "科学院",
+                "中国科学院",
+                "计算",
+                "计算所",
+                "，",
+                "后",
+                "在",
+                "日本",
+                "京都",
+                "大学",
+                "日本京都大学",
+                "深造"
+            ]
         );
     }
 
@@ -1138,6 +1201,33 @@ mod tests {
                     word: "叛徒",
                     start: 7,
                     end: 9
+                }
+            ]
+        );
+
+        let tokens = jieba.tokenize("永和服装饰品有限公司", TokenizeMode::Default, true);
+        assert_eq!(
+            tokens,
+            vec![
+                Token {
+                    word: "永和",
+                    start: 0,
+                    end: 2
+                },
+                Token {
+                    word: "服装",
+                    start: 2,
+                    end: 4
+                },
+                Token {
+                    word: "饰品",
+                    start: 4,
+                    end: 6
+                },
+                Token {
+                    word: "有限公司",
+                    start: 6,
+                    end: 10
                 }
             ]
         );
