@@ -126,7 +126,12 @@ pub unsafe extern "C" fn jieba_cut_all(j: *mut CJieba, sentence: *const c_char, 
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn jieba_cut_for_search(j: *mut CJieba, sentence: *const c_char, len: usize, hmm: bool) -> *mut CJiebaWords {
+pub unsafe extern "C" fn jieba_cut_for_search(
+    j: *mut CJieba,
+    sentence: *const c_char,
+    len: usize,
+    hmm: bool,
+) -> *mut CJiebaWords {
     let jieba = j as *mut Jieba;
     let c_str = CFixedStr::from_ptr(sentence, len);
     // FIXME: remove allocation
