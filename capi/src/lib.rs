@@ -12,6 +12,37 @@ pub struct CJiebaWords {
     pub len: usize,
 }
 
+#[repr(C)]
+pub struct CJiebaToken {
+    pub word: FfiStr,
+    pub start: usize,
+    pub end: usize,
+}
+
+#[repr(C)]
+pub struct CJiebaTokens {
+    pub tokens: *mut CJiebaToken,
+    pub len: usize,
+}
+
+/// Tokenize mode
+#[repr(C)]
+pub enum TokenizeMode {
+    /// Default mode
+    Default = 0,
+    /// Search mode
+    Search = 1,
+}
+
+impl From<TokenizeMode> for jieba_rs::TokenizeMode {
+    fn from(mode: TokenizeMode) -> Self {
+        match mode {
+            TokenizeMode::Default => jieba_rs::TokenizeMode::Default,
+            TokenizeMode::Search => jieba_rs::TokenizeMode::Search,
+        }
+    }
+}
+
 /// Represents a string.
 #[repr(C)]
 pub struct FfiStr {
@@ -100,10 +131,10 @@ pub unsafe extern "C" fn jieba_cut(j: *mut CJieba, sentence: *const c_char, len:
     let words = (*jieba).cut(&s, hmm);
     let mut c_words: Vec<FfiStr> = words.into_iter().map(|x| FfiStr::from_string(x.to_string())).collect();
     let words_len = c_words.len();
-    let buffer = c_words.as_mut_ptr();
+    let ptr = c_words.as_mut_ptr();
     mem::forget(c_words);
     Box::into_raw(Box::new(CJiebaWords {
-        words: buffer,
+        words: ptr,
         len: words_len,
     }))
 }
@@ -117,10 +148,10 @@ pub unsafe extern "C" fn jieba_cut_all(j: *mut CJieba, sentence: *const c_char, 
     let words = (*jieba).cut_all(&s);
     let mut c_words: Vec<FfiStr> = words.into_iter().map(|x| FfiStr::from_string(x.to_string())).collect();
     let words_len = c_words.len();
-    let buffer = c_words.as_mut_ptr();
+    let ptr = c_words.as_mut_ptr();
     mem::forget(c_words);
     Box::into_raw(Box::new(CJiebaWords {
-        words: buffer,
+        words: ptr,
         len: words_len,
     }))
 }
@@ -139,10 +170,10 @@ pub unsafe extern "C" fn jieba_cut_for_search(
     let words = (*jieba).cut_for_search(&s, hmm);
     let mut c_words: Vec<FfiStr> = words.into_iter().map(|x| FfiStr::from_string(x.to_string())).collect();
     let words_len = c_words.len();
-    let buffer = c_words.as_mut_ptr();
+    let ptr = c_words.as_mut_ptr();
     mem::forget(c_words);
     Box::into_raw(Box::new(CJiebaWords {
-        words: buffer,
+        words: ptr,
         len: words_len,
     }))
 }
@@ -152,6 +183,44 @@ pub unsafe extern "C" fn jieba_words_free(c_words: *mut CJiebaWords) {
     if !c_words.is_null() {
         Vec::from_raw_parts((*c_words).words, (*c_words).len, (*c_words).len);
         Box::from_raw(c_words);
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn jieba_tokenize(
+    j: *mut CJieba,
+    sentence: *const c_char,
+    len: usize,
+    mode: TokenizeMode,
+    hmm: bool,
+) -> *mut CJiebaTokens {
+    let jieba = j as *mut Jieba;
+    let c_str = CFixedStr::from_ptr(sentence, len);
+    // FIXME: remove allocation
+    let s = String::from_utf8_lossy(c_str.as_bytes_full());
+    let tokens = (*jieba).tokenize(&s, mode.into(), hmm);
+    let mut c_tokens: Vec<CJiebaToken> = tokens
+        .into_iter()
+        .map(|x| CJiebaToken {
+            word: FfiStr::from_string(x.word.to_string()),
+            start: x.start,
+            end: x.end,
+        })
+        .collect();
+    let tokens_len = c_tokens.len();
+    let ptr = c_tokens.as_mut_ptr();
+    mem::forget(c_tokens);
+    Box::into_raw(Box::new(CJiebaTokens {
+        tokens: ptr,
+        len: tokens_len,
+    }))
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn jieba_tokens_free(c_tokens: *mut CJiebaTokens) {
+    if !c_tokens.is_null() {
+        Vec::from_raw_parts((*c_tokens).tokens, (*c_tokens).len, (*c_tokens).len);
+        Box::from_raw(c_tokens);
     }
 }
 
