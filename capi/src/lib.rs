@@ -43,6 +43,18 @@ impl From<TokenizeMode> for jieba_rs::TokenizeMode {
     }
 }
 
+#[repr(C)]
+pub struct CJiebaTag {
+    pub word: FfiStr,
+    pub tag: FfiStr,
+}
+
+#[repr(C)]
+pub struct CJiebaTags {
+    pub tags: *mut CJiebaTag,
+    pub len: usize,
+}
+
 /// Represents a string.
 #[repr(C)]
 pub struct FfiStr {
@@ -221,6 +233,37 @@ pub unsafe extern "C" fn jieba_tokens_free(c_tokens: *mut CJiebaTokens) {
     if !c_tokens.is_null() {
         Vec::from_raw_parts((*c_tokens).tokens, (*c_tokens).len, (*c_tokens).len);
         Box::from_raw(c_tokens);
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn jieba_tag(j: *mut CJieba, sentence: *const c_char, len: usize, hmm: bool) -> *mut CJiebaTags {
+    let jieba = j as *mut Jieba;
+    let c_str = CFixedStr::from_ptr(sentence, len);
+    // FIXME: remove allocation
+    let s = String::from_utf8_lossy(c_str.as_bytes_full());
+    let tags = (*jieba).tag(&s, hmm);
+    let mut c_tags: Vec<CJiebaTag> = tags
+        .into_iter()
+        .map(|x| CJiebaTag {
+            word: FfiStr::from_string(x.word.to_string()),
+            tag: FfiStr::from_string(x.tag.to_string()),
+        })
+        .collect();
+    let tags_len = c_tags.len();
+    let ptr = c_tags.as_mut_ptr();
+    mem::forget(c_tags);
+    Box::into_raw(Box::new(CJiebaTags {
+        tags: ptr,
+        len: tags_len,
+    }))
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn jieba_tags_free(c_tags: *mut CJiebaTags) {
+    if !c_tags.is_null() {
+        Vec::from_raw_parts((*c_tags).tags, (*c_tags).len, (*c_tags).len);
+        Box::from_raw(c_tags);
     }
 }
 
