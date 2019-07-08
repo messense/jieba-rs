@@ -1,5 +1,5 @@
 use c_fixed_string::CFixedStr;
-use jieba_rs::{Jieba, KeywordExtract, TextRank};
+use jieba_rs::{Jieba, KeywordExtract, TextRank, TFIDF};
 use std::boxed::Box;
 use std::os::raw::c_char;
 use std::{mem, ptr};
@@ -186,6 +186,47 @@ pub unsafe extern "C" fn jieba_cut_for_search(
     mem::forget(c_words);
     Box::into_raw(Box::new(CJiebaWords {
         words: ptr,
+        len: words_len,
+    }))
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn jieba_extract_tfidf(
+    j: *mut CJieba,
+    sentence: *const c_char,
+    len: usize,
+    top_k: usize,
+    allowed_pos: *const *mut c_char,
+    allowed_pos_len: usize,
+) -> *mut CJiebaWords {
+    let jieba = j as *mut Jieba;
+    let c_str = CFixedStr::from_ptr(sentence, len);
+    // FIXME: remove allocation
+    let s = String::from_utf8_lossy(c_str.as_bytes_full());
+
+    let allowed_pos: Vec<String> = if allowed_pos_len == 0 || allowed_pos.is_null() {
+        Vec::new()
+    } else {
+        let mut v = Vec::with_capacity(allowed_pos_len);
+
+        let slice: &[*mut c_char] = std::slice::from_raw_parts(allowed_pos, allowed_pos_len);
+        for ptr in slice.into_iter() {
+            let cstring_allowed_pos = std::ffi::CString::from_raw(*ptr);
+            let string_allowed_pos = cstring_allowed_pos.into_string().expect("into_string().err() failed");
+            v.push(string_allowed_pos);
+        }
+
+        v
+    };
+
+    let tfidf = TFIDF::new_with_jieba(&*jieba);
+    let words = tfidf.extract_tags(&s, top_k, allowed_pos);
+    let mut c_words: Vec<FfiStr> = words.into_iter().map(|x| FfiStr::from_string(x.to_string())).collect();
+    let words_len = c_words.len();
+    let buffer = c_words.as_mut_ptr();
+    mem::forget(c_words);
+    Box::into_raw(Box::new(CJiebaWords {
+        words: buffer,
         len: words_len,
     }))
 }
