@@ -1,7 +1,6 @@
 # jieba-rs
 
 [![Build Status](https://dev.azure.com/messense/jieba-rs/_apis/build/status/messense.jieba-rs?branchName=master)](https://dev.azure.com/messense/jieba-rs/_build/latest?definitionId=1&branchName=master)
-[![Build Status](https://travis-ci.com/messense/jieba-rs.svg?branch=master)](https://travis-ci.com/messense/jieba-rs)
 [![codecov](https://codecov.io/gh/messense/jieba-rs/branch/master/graph/badge.svg)](https://codecov.io/gh/messense/jieba-rs)
 [![Crates.io](https://img.shields.io/crates/v/jieba-rs.svg)](https://crates.io/crates/jieba-rs)
 [![docs.rs](https://docs.rs/jieba-rs/badge.svg)](https://docs.rs/jieba-rs/)
