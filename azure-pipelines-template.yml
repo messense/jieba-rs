@@ -62,5 +62,5 @@ jobs:
     - script: |
         cargo install cargo-tarpaulin
         cargo tarpaulin --all-features --out Xml
-        bash <(curl -s https://codecov.io/bash)
+        bash <(curl -s https://codecov.io/bash) -t 83e4b212-e560-4400-9160-fb91be0e4753
       displayName: 'Code Coverage'
