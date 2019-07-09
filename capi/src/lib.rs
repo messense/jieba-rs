@@ -5,6 +5,7 @@ use std::os::raw::c_char;
 use std::{mem, ptr};
 
 pub struct CJieba;
+pub struct CJiebaTFIDF;
 
 #[repr(C)]
 pub struct CJiebaWords {
@@ -191,15 +192,30 @@ pub unsafe extern "C" fn jieba_cut_for_search(
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn jieba_extract_tfidf(
-    j: *mut CJieba,
+pub unsafe extern "C" fn jieba_tfidf_new(j: *mut CJieba) -> *mut CJiebaTFIDF {
+    let jieba = j as *mut Jieba;
+    let tfidf = TFIDF::new_with_jieba(&*jieba);
+    Box::into_raw(Box::new(tfidf)) as *mut CJiebaTFIDF
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn jieba_tfidf_free(t: *mut CJiebaTFIDF) {
+    if !t.is_null() {
+        let tfidf = t as *mut TFIDF;
+        Box::from_raw(tfidf);
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn jieba_tfidf_extract(
+    t: *mut CJiebaTFIDF,
     sentence: *const c_char,
     len: usize,
     top_k: usize,
     allowed_pos: *const *mut c_char,
     allowed_pos_len: usize,
 ) -> *mut CJiebaWords {
-    let jieba = j as *mut Jieba;
+    let tfidf = t as *mut TFIDF;
     let c_str = CFixedStr::from_ptr(sentence, len);
     // FIXME: remove allocation
     let s = String::from_utf8_lossy(c_str.as_bytes_full());
@@ -219,14 +235,13 @@ pub unsafe extern "C" fn jieba_extract_tfidf(
         v
     };
 
-    let tfidf = TFIDF::new_with_jieba(&*jieba);
-    let words = tfidf.extract_tags(&s, top_k, allowed_pos);
+    let words = (*tfidf).extract_tags(&s, top_k, allowed_pos);
     let mut c_words: Vec<FfiStr> = words.into_iter().map(|x| FfiStr::from_string(x.to_string())).collect();
     let words_len = c_words.len();
-    let buffer = c_words.as_mut_ptr();
+    let ptr = c_words.as_mut_ptr();
     mem::forget(c_words);
     Box::into_raw(Box::new(CJiebaWords {
-        words: buffer,
+        words: ptr,
         len: words_len,
     }))
 }
@@ -264,10 +279,10 @@ pub unsafe extern "C" fn jieba_textrank_extract(
     let words = textrank.extract_tags(&s, top_k, allowed_pos);
     let mut c_words: Vec<FfiStr> = words.into_iter().map(|x| FfiStr::from_string(x.to_string())).collect();
     let words_len = c_words.len();
-    let buffer = c_words.as_mut_ptr();
+    let ptr = c_words.as_mut_ptr();
     mem::forget(c_words);
     Box::into_raw(Box::new(CJiebaWords {
-        words: buffer,
+        words: ptr,
         len: words_len,
     }))
 }
