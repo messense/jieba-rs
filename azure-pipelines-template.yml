@@ -1,0 +1,57 @@
+jobs:
+- job: ${{ parameters.name }}
+  pool:
+    vmImage: ${{ parameters.vmImage }}
+  strategy:
+    matrix:
+      stable:
+        rust_version: stable
+      beta:
+        rust_version: beta
+      nightly:
+        rust_version: nightly
+    maxParallel: 3
+  steps:
+
+  # Unix Rust installation
+  - ${{ if ne(parameters.name, 'Windows') }}:
+    - script: |
+        curl https://sh.rustup.rs -sSf | sh -s -- -y --default-toolchain $(rust_version)
+        if [[ "$rust_version" == "stable" ]]; then
+          rustup component add clippy
+        fi
+        echo "##vso[task.setvariable variable=PATH]$PATH:$HOME/.cargo/bin"
+      displayName: 'Install Rust ($(rust_version))'
+
+  # Windows Rust installation
+  - ${{ if eq(parameters.name, 'Windows') }}:
+    - script: |
+        curl -sSf -o rustup-init.exe https://win.rustup.rs
+        rustup-init.exe -y --default-toolchain $(rust_version)
+        echo ##vso[task.setvariable variable=PATH]%PATH%;%USERPROFILE%\.cargo\bin
+      displayName: 'Install Rust ($(rust_version))'
+
+  # Sanity check version information.
+  - script: |
+      rustup default $(rust_version)
+      rustc -Vv && cargo -V
+    displayName: 'Rust/Cargo Version Information'
+
+  # Run Rocket testing script(s)
+  - script: |
+      cargo fmt --all -- --check
+      cargo build --no-default-features
+      cargo build
+      cargo build --features tfidf
+      cargo build --features textrank
+      cargo build --all-features --all
+      cargo test --all-features --all
+    displayName: 'Unit Tests'
+
+  # Report code coverage
+  - ${{ if eq(parameters.name, 'Linux') }}:
+    - script: |
+        cargo install cargo-tarpaulin
+        cargo tarpaulin --all-features --out Xml
+        bash <(curl -s https://codecov.io/bash)
+        displayName: 'Code Coverage'
