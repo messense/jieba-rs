@@ -17,6 +17,7 @@ jobs:
   - ${{ if ne(parameters.name, 'Windows') }}:
     - script: |
         curl https://sh.rustup.rs -sSf | sh -s -- -y --default-toolchain $(rust_version)
+        rustup component add rustfmt
         if [[ "$rust_version" == "stable" ]]; then
           rustup component add clippy
         fi
@@ -37,15 +38,23 @@ jobs:
       rustc -Vv && cargo -V
     displayName: 'Rust/Cargo Version Information'
 
-  # Run Rocket testing script(s)
+  # Check code style
   - script: |
       cargo fmt --all -- --check
+    displayName: 'Check Code Style'
+
+  # Run unit tests
+  - script: |
       cargo build --no-default-features
       cargo build
       cargo build --features tfidf
       cargo build --features textrank
       cargo build --all-features --all
       cargo test --all-features --all
+      if [[ "$rust_version" == "stable" ]]; then
+        cargo clippy --all-features
+        cargo bench --all-features -- --test
+      fi
     displayName: 'Unit Tests'
 
   # Report code coverage
