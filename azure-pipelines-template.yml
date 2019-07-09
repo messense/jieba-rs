@@ -17,10 +17,6 @@ jobs:
   - ${{ if ne(parameters.name, 'Windows') }}:
     - script: |
         curl https://sh.rustup.rs -sSf | sh -s -- -y --default-toolchain $(rust_version)
-        rustup component add rustfmt
-        if [[ "$rust_version" == "stable" ]]; then
-          rustup component add clippy
-        fi
         echo "##vso[task.setvariable variable=PATH]$PATH:$HOME/.cargo/bin"
       displayName: 'Install Rust ($(rust_version))'
 
@@ -36,6 +32,10 @@ jobs:
   - script: |
       rustup default $(rust_version)
       rustc -Vv && cargo -V
+      rustup component add rustfmt
+      if [[ "$rust_version" == "stable" ]]; then
+        rustup component add clippy
+      fi
     displayName: 'Rust/Cargo Version Information'
 
   # Check code style
