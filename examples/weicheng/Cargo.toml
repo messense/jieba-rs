@@ -6,4 +6,6 @@ edition = "2018"
 
 [dependencies]
 jieba-rs = { path = "../.." }
+
+[target.'cfg(unix)'.dependencies]
 jemallocator = "0.3.2"

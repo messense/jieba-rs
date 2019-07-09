@@ -8,6 +8,7 @@ use rand::Rng;
 use smallvec::SmallVec;
 use std::collections::btree_map::BTreeMap;
 
+#[cfg(unix)]
 #[global_allocator]
 static ALLOC: jemallocator::Jemalloc = jemallocator::Jemalloc;
 

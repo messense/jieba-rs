@@ -1,6 +1,7 @@
 use jieba_rs::Jieba;
 use std::time;
 
+#[cfg(unix)]
 #[global_allocator]
 static ALLOC: jemallocator::Jemalloc = jemallocator::Jemalloc;
 

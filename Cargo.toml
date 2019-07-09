@@ -16,6 +16,8 @@ all-features = true
 [dev-dependencies]
 criterion = "0.2"
 rand = "0.7"
+
+[target.'cfg(unix)'.dev-dependencies]
 jemallocator = "0.3.2"
 
 [[bench]]
