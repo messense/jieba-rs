@@ -232,7 +232,7 @@ pub unsafe extern "C" fn jieba_extract_tfidf(
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn jieba_extract_textrank(
+pub unsafe extern "C" fn jieba_textrank_extract(
     j: *mut CJieba,
     sentence: *const c_char,
     len: usize,
