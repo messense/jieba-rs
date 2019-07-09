@@ -29,7 +29,7 @@ jobs:
       displayName: 'Install Rust ($(rust_version))'
 
   # Sanity check version information.
-  - script: |
+  - bash: |
       rustup default $(rust_version)
       rustc -Vv && cargo -V
       rustup component add rustfmt
@@ -44,7 +44,7 @@ jobs:
     displayName: 'Check Code Style'
 
   # Run unit tests
-  - script: |
+  - bash: |
       cargo build --no-default-features
       cargo build
       cargo build --features tfidf
