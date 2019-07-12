@@ -1,7 +1,7 @@
 #[macro_use]
 extern crate criterion;
 
-use criterion::{black_box, Benchmark, Criterion, Throughput};
+use criterion::{black_box, Benchmark, Criterion, Throughput, ParameterizedBenchmark};
 use jieba_rs::{Jieba, KeywordExtract, TextRank, TokenizeMode, TFIDF};
 use lazy_static::lazy_static;
 use rand::Rng;
@@ -101,14 +101,14 @@ fn criterion_benchmark(c: &mut Criterion) {
 
     c.bench(
         "dag",
-        Benchmark::new("with btree", |b| b.iter(|| bench_dag_with_btree(black_box(SENTENCE))))
-            .throughput(Throughput::Bytes(SENTENCE.len() as u32)),
-    );
-
-    c.bench(
-        "dag",
-        Benchmark::new("with vec", |b| b.iter(|| bench_dag_with_vec(black_box(SENTENCE))))
-            .throughput(Throughput::Bytes(SENTENCE.len() as u32)),
+        ParameterizedBenchmark::new(
+            "with btree",
+            |b, i| b.iter(|| bench_dag_with_btree(i)),
+            vec![SENTENCE]
+        ).with_function(
+            "with vec",
+            |b, i| b.iter(|| bench_dag_with_vec(i)),
+        ).throughput(|i| Throughput::Bytes(i.len() as u32)),
     );
 
     c.bench(
