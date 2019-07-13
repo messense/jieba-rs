@@ -72,6 +72,7 @@ use lazy_static::lazy_static;
 use std::cmp::Ordering;
 use std::io::{self, BufRead};
 
+use cedarwood::Cedar;
 use regex::{Match, Matches, Regex};
 use smallvec::SmallVec;
 
@@ -196,7 +197,8 @@ pub struct Tag<'a> {
 /// Jieba segmentation
 #[derive(Debug, Clone)]
 pub struct Jieba {
-    dict: hashbrown::HashMap<String, (usize, String)>,
+    records: Vec<(String, usize, String)>,
+    cedar: Cedar,
     total: usize,
     longest_word_len: usize,
 }
@@ -212,7 +214,8 @@ impl Jieba {
     /// Create a new instance with empty dict
     pub fn empty() -> Self {
         Jieba {
-            dict: hashbrown::HashMap::new(),
+            records: Vec::new(),
+            cedar: Cedar::new(),
             total: 0,
             longest_word_len: 0,
         }
@@ -244,14 +247,20 @@ impl Jieba {
         let freq = freq.unwrap_or_else(|| self.suggest_freq(word));
         let tag = tag.unwrap_or("");
 
-        self.dict.insert(word.to_string(), (freq, tag.to_string()));
-        let char_indices = word.char_indices().map(|x| x.0).collect::<Vec<_>>();
-        for index in char_indices.into_iter().skip(1) {
-            let wfrag = &word[0..index];
-            self.dict.entry(wfrag.to_string()).or_insert((0, "".to_string()));
-        }
+        match self.cedar.exact_match_search(word) {
+            Some((word_id, _, _)) => {
+                let old_freq = self.records[word_id as usize].1;
+                self.records[word_id as usize].1 = freq;
+                self.total += freq - old_freq;
+            }
+            None => {
+                self.records.push((String::from(word), freq, String::from(tag)));
+                let word_id = (self.records.len() - 1) as i32;
 
-        self.total += freq;
+                self.cedar.update(word, word_id);
+                self.total += freq;
+            }
+        };
 
         let curr_word_len = word.chars().count();
         if self.longest_word_len < curr_word_len {
@@ -264,6 +273,9 @@ impl Jieba {
     /// Load dictionary
     pub fn load_dict<R: BufRead>(&mut self, dict: &mut R) -> io::Result<()> {
         let mut buf = String::new();
+        self.total = 0;
+        self.longest_word_len = 0;
+
         while dict.read_line(&mut buf)? > 0 {
             {
                 let parts: Vec<&str> = buf.trim().split_whitespace().collect();
@@ -273,21 +285,42 @@ impl Jieba {
                 }
 
                 let word = parts[0];
-                let freq = parts.get(1).map(|x| x.parse::<usize>().unwrap());
-                let tag = parts.get(2).cloned();
+                let freq = parts.get(1).map(|x| x.parse::<usize>().unwrap()).unwrap_or(0);
+                let tag = parts.get(2).cloned().unwrap_or("");
 
-                self.add_word(word, freq, tag);
+                let curr_word_len = word.chars().count();
+                if self.longest_word_len < curr_word_len {
+                    self.longest_word_len = curr_word_len;
+                }
+
+                match self.cedar.exact_match_search(word) {
+                    Some((word_id, _, _)) => {
+                        self.records[word_id as usize].1 = freq;
+                    }
+                    None => {
+                        self.records.push((String::from(word), freq, String::from(tag)));
+                    }
+                };
             }
             buf.clear();
         }
+
+        let key_values: Vec<(&str, i32)> = self
+            .records
+            .iter()
+            .enumerate()
+            .map(|(k, n)| (n.0.as_ref(), k as i32))
+            .collect();
+        self.total = self.records.iter().map(|n| n.1).sum();
+        self.cedar = Cedar::new();
+        self.cedar.build(&key_values);
+
         Ok(())
     }
 
     fn get_word_freq(&self, word: &str, default: usize) -> usize {
-        match self.dict.get(word) {
-            Some(e) => match *e {
-                (freq, _) => freq,
-            },
+        match self.cedar.exact_match_search(word) {
+            Some((word_id, _, _)) => self.records[word_id as usize].1,
             _ => default,
         }
     }
@@ -322,7 +355,12 @@ impl Jieba {
                         &sentence[byte_start..byte_end]
                     };
 
-                    let freq = self.dict.get(wfrag).map(|x| x.0).unwrap_or(1);
+                    let freq = if let Some((word_id, _, _)) = self.cedar.exact_match_search(wfrag) {
+                        self.records[word_id as usize].1
+                    } else {
+                        1
+                    };
+
                     ((freq as f64).ln() - logtotal + route[byte_end].0, byte_end)
                 })
                 .max_by(|x, y| x.partial_cmp(y).unwrap_or(Ordering::Equal));
@@ -331,13 +369,7 @@ impl Jieba {
                 route[byte_start] = p;
             } else {
                 let byte_end = prev_byte_start;
-                let wfrag = if byte_end == str_len {
-                    &sentence[byte_start..]
-                } else {
-                    &sentence[byte_start..byte_end]
-                };
-
-                let freq = self.dict.get(wfrag).map(|x| x.0).unwrap_or(1);
+                let freq = 1;
                 route[byte_start] = ((freq as f64).ln() - logtotal + route[byte_end].0, byte_end);
             }
 
@@ -352,26 +384,13 @@ impl Jieba {
             dag.resize(str_len, SmallVec::new());
         }
 
-        let mut curr = sentence.char_indices().peekable();
-        while let Some((byte_start, _)) = curr.next() {
+        let mut iter = sentence.char_indices().peekable();
+        while let Some((byte_start, _)) = iter.next() {
             let mut tmplist = SmallVec::new();
-            let mut next = curr.clone();
+            let haystack = &sentence[byte_start..];
 
-            while let Some((byte_end, _)) = next.next() {
-                let wfrag = &sentence[byte_start..byte_end];
-                if let Some(freq) = self.dict.get(wfrag).map(|x| x.0) {
-                    if freq > 0 {
-                        tmplist.push(byte_end);
-                    }
-                } else {
-                    break;
-                }
-            }
-
-            if let Some(freq) = self.dict.get(&sentence[byte_start..]).map(|x| x.0) {
-                if freq > 0 {
-                    tmplist.push(str_len);
-                }
+            for (_, end_index) in self.cedar.common_prefix_iter(haystack) {
+                tmplist.push(end_index + byte_start + 1);
             }
 
             if !tmplist.is_empty() {
@@ -484,7 +503,7 @@ impl Jieba {
 
                     if word.chars().count() == 1 {
                         words.push(word);
-                    } else if !self.dict.get(word).map(|x| x.0 > 0).unwrap_or(false) {
+                    } else if self.cedar.exact_match_search(word).is_none() {
                         hmm::cut_with_allocated_memory(word, words, V, prev, path);
                     } else {
                         let mut word_indices = word.char_indices().map(|x| x.0).peekable();
@@ -513,7 +532,7 @@ impl Jieba {
 
             if word.chars().count() == 1 {
                 words.push(word);
-            } else if !self.dict.get(word).map(|x| x.0 > 0).unwrap_or(false) {
+            } else if self.cedar.exact_match_search(word).is_none() {
                 hmm::cut(word, words);
             } else {
                 let mut word_indices = word.char_indices().map(|x| x.0).peekable();
@@ -631,7 +650,7 @@ impl Jieba {
                     } else {
                         &word[byte_start..]
                     };
-                    if self.dict.get(gram2).map(|x| x.0 > 0).unwrap_or(false) {
+                    if self.cedar.exact_match_search(gram2).is_some() {
                         new_words.push(gram2);
                     }
                 }
@@ -644,7 +663,7 @@ impl Jieba {
                     } else {
                         &word[byte_start..]
                     };
-                    if self.dict.get(gram3).map(|x| x.0 > 0).unwrap_or(false) {
+                    if self.cedar.exact_match_search(gram3).is_some() {
                         new_words.push(gram3);
                     }
                 }
@@ -691,7 +710,7 @@ impl Jieba {
                             } else {
                                 &word[byte_start..]
                             };
-                            if self.dict.get(gram2).map(|x| x.0 > 0).unwrap_or(false) {
+                            if self.cedar.exact_match_search(gram2).is_some() {
                                 tokens.push(Token {
                                     word: gram2,
                                     start: start + i,
@@ -707,7 +726,7 @@ impl Jieba {
                                 } else {
                                     &word[byte_start..]
                                 };
-                                if self.dict.get(gram3).map(|x| x.0 > 0).unwrap_or(false) {
+                                if self.cedar.exact_match_search(gram3).is_some() {
                                     tokens.push(Token {
                                         word: gram3,
                                         start: start + i,
@@ -741,10 +760,9 @@ impl Jieba {
         words
             .into_iter()
             .map(|word| {
-                if let Some(tag) = self.dict.get(word) {
-                    if tag.0 != 0 {
-                        return Tag { word, tag: &tag.1 };
-                    }
+                if let Some((word_id, _, _)) = self.cedar.exact_match_search(word) {
+                    let t = &self.records[word_id as usize].2;
+                    return Tag { word, tag: t };
                 }
                 let mut eng = 0;
                 let mut m = 0;
