@@ -74,7 +74,6 @@ use std::io::{self, BufRead};
 
 use cedarwood::Cedar;
 use regex::{Match, Matches, Regex};
-use smallvec::SmallVec;
 
 #[cfg(feature = "textrank")]
 pub use crate::keywords::textrank::TextRank;
@@ -86,11 +85,12 @@ pub use crate::keywords::KeywordExtract;
 mod hmm;
 #[cfg(any(feature = "tfidf", feature = "textrank"))]
 mod keywords;
+mod sparse_dag;
 
 #[cfg(feature = "default-dict")]
 static DEFAULT_DICT: &str = include_str!("data/dict.txt");
 
-type DAG = Vec<SmallVec<[usize; 5]>>;
+use sparse_dag::StaticSparseDAG;
 
 lazy_static! {
     static ref RE_HAN_DEFAULT: Regex = Regex::new(r"([\u{3400}-\u{4DBF}\u{4E00}-\u{9FFF}\u{F900}-\u{FAFF}\u{20000}-\u{2A6DF}\u{2A700}-\u{2B73F}\u{2B740}-\u{2B81F}\u{2B820}-\u{2CEAF}\u{2CEB0}-\u{2EBEF}\u{2F800}-\u{2FA1F}a-zA-Z0-9+#&\._%]+)").unwrap();
@@ -335,7 +335,7 @@ impl Jieba {
     }
 
     #[allow(clippy::ptr_arg)]
-    fn calc(&self, sentence: &str, dag: &DAG, route: &mut Vec<(f64, usize)>) {
+    fn calc(&self, sentence: &str, dag: &StaticSparseDAG, route: &mut Vec<(f64, usize)>) {
         let str_len = sentence.len();
 
         if str_len + 1 > route.len() {
@@ -346,9 +346,9 @@ impl Jieba {
         let mut prev_byte_start = str_len;
         let curr = sentence.char_indices().map(|x| x.0).rev();
         for byte_start in curr {
-            let pair = dag[byte_start]
-                .iter()
-                .map(|&byte_end| {
+            let pair = dag
+                .iter_edges(byte_start)
+                .map(|byte_end| {
                     let wfrag = if byte_end == str_len {
                         &sentence[byte_start..]
                     } else {
@@ -377,40 +377,32 @@ impl Jieba {
         }
     }
 
-    fn dag(&self, sentence: &str, dag: &mut DAG) {
-        let str_len = sentence.len();
-
-        if str_len > dag.len() {
-            dag.resize(str_len, SmallVec::new());
-        }
-
+    fn dag(&self, sentence: &str, dag: &mut StaticSparseDAG) {
         let mut iter = sentence.char_indices().peekable();
         while let Some((byte_start, _)) = iter.next() {
-            let mut tmplist = SmallVec::new();
+            dag.start(byte_start);
             let haystack = &sentence[byte_start..];
 
             for (_, end_index) in self.cedar.common_prefix_iter(haystack) {
-                tmplist.push(end_index + byte_start + 1);
+                dag.insert(end_index + byte_start + 1);
             }
 
-            if !tmplist.is_empty() {
-                dag[byte_start] = tmplist;
-            }
+            dag.commit();
         }
     }
 
     fn cut_all_internal<'a>(&self, sentence: &'a str, words: &mut Vec<&'a str>) {
         let str_len = sentence.len();
-        let mut dag = Vec::with_capacity(sentence.len());
+        let mut dag = StaticSparseDAG::with_size_hint(sentence.len());
         self.dag(sentence, &mut dag);
 
         let curr = sentence.char_indices().map(|x| x.0);
         for byte_start in curr {
-            for byte_end in &dag[byte_start] {
-                let word = if *byte_end == str_len {
+            for byte_end in dag.iter_edges(byte_start) {
+                let word = if byte_end == str_len {
                     &sentence[byte_start..]
                 } else {
-                    &sentence[byte_start..*byte_end]
+                    &sentence[byte_start..byte_end]
                 };
 
                 words.push(word)
@@ -423,7 +415,7 @@ impl Jieba {
         sentence: &'a str,
         words: &mut Vec<&'a str>,
         route: &mut Vec<(f64, usize)>,
-        dag: &mut DAG,
+        dag: &mut StaticSparseDAG,
     ) {
         self.dag(sentence, dag);
         self.calc(sentence, dag, route);
@@ -475,7 +467,7 @@ impl Jieba {
         sentence: &'a str,
         words: &mut Vec<&'a str>,
         route: &mut Vec<(f64, usize)>,
-        dag: &mut DAG,
+        dag: &mut StaticSparseDAG,
         V: &mut Vec<f64>,
         prev: &mut Vec<Option<hmm::Status>>,
         path: &mut Vec<hmm::Status>,
@@ -558,7 +550,7 @@ impl Jieba {
         let re_skip: &Regex = if cut_all { &*RE_SKIP_CUT_ALL } else { &*RE_SKIP_DEAFULT };
         let splitter = SplitMatches::new(&re_han, sentence);
         let mut route = Vec::with_capacity(heuristic_capacity);
-        let mut dag = Vec::with_capacity(heuristic_capacity);
+        let mut dag = StaticSparseDAG::with_size_hint(heuristic_capacity);
 
         let R = 4;
         let C = sentence.chars().count();
@@ -789,8 +781,7 @@ impl Jieba {
 
 #[cfg(test)]
 mod tests {
-    use super::{Jieba, SplitMatches, SplitState, Tag, Token, TokenizeMode, DAG, RE_HAN_DEFAULT};
-    use smallvec::SmallVec;
+    use super::{Jieba, SplitMatches, SplitState, Tag, Token, TokenizeMode, RE_HAN_DEFAULT};
     use std::io::BufReader;
 
     #[test]
@@ -826,19 +817,6 @@ mod tests {
 
         let result: Vec<&str> = splitter.map(|x| x.into_str()).collect();
         assert_eq!(result, vec!["讥䶯䶰䶱䶲䶳䶴䶵𦡦"]);
-    }
-
-    #[test]
-    fn test_dag() {
-        let jieba = Jieba::new();
-        let sentence = "网球拍卖会";
-        let mut dag = DAG::new();
-        jieba.dag(sentence, &mut dag);
-        assert_eq!(dag[0], SmallVec::from_buf([3, 6, 9]));
-        assert_eq!(dag[3], SmallVec::from_buf([6, 9]));
-        assert_eq!(dag[6], SmallVec::from_buf([9, 12, 15]));
-        assert_eq!(dag[9], SmallVec::from_buf([12]));
-        assert_eq!(dag[12], SmallVec::from_buf([15]));
     }
 
     #[test]
