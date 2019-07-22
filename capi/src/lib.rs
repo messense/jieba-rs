@@ -365,6 +365,15 @@ pub unsafe extern "C" fn jieba_tags_free(c_tags: *mut CJiebaTags) {
 }
 
 #[no_mangle]
+pub unsafe extern "C" fn jieba_add_word(j: *mut CJieba, word: *const c_char, len: usize) -> usize {
+    let jieba = j as *mut Jieba;
+    let c_str = CFixedStr::from_ptr(word, len);
+    // FIXME: remove allocation
+    let s = String::from_utf8_lossy(c_str.as_bytes_full());
+    (*jieba).add_word(&s, None, None)
+}
+
+#[no_mangle]
 pub unsafe extern "C" fn jieba_suggest_freq(j: *mut CJieba, segment: *const c_char, len: usize) -> usize {
     let jieba = j as *mut Jieba;
     let c_str = CFixedStr::from_ptr(segment, len);
