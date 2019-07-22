@@ -386,6 +386,7 @@ pub unsafe extern "C" fn jieba_suggest_freq(j: *mut CJieba, segment: *const c_ch
 #[cfg(test)]
 mod test {
     use super::*;
+    use std::ffi::CString;
 
     #[test]
     fn test_jieba_new_and_free() {
@@ -399,6 +400,17 @@ mod test {
     fn test_jieba_empty_and_free() {
         unsafe {
             let jieba = jieba_empty();
+            jieba_free(jieba);
+        }
+    }
+
+    #[test]
+    fn test_jieba_add_word() {
+        unsafe {
+            let jieba = jieba_empty();
+            let word = "今天";
+            let c_word = CString::new(word).unwrap();
+            jieba_add_word(jieba, c_word.as_ptr(), word.len());
             jieba_free(jieba);
         }
     }
