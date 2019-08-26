@@ -30,7 +30,7 @@ fn criterion_benchmark(c: &mut Criterion) {
         .with_function("cut_for_search", |b, i| {
             b.iter(|| JIEBA.cut_for_search(black_box(i), true))
         })
-        .throughput(|i| Throughput::Bytes(i.len() as u32)),
+        .throughput(|i| Throughput::Bytes(i.len() as u64)),
     );
 
     c.bench(
@@ -43,13 +43,13 @@ fn criterion_benchmark(c: &mut Criterion) {
         .with_function("search mode", |b, i| {
             b.iter(|| JIEBA.tokenize(black_box(i), TokenizeMode::Search, true))
         })
-        .throughput(|i| Throughput::Bytes(i.len() as u32)),
+        .throughput(|i| Throughput::Bytes(i.len() as u64)),
     );
 
     c.bench(
         "jieba",
         Benchmark::new("tag", |b| b.iter(|| JIEBA.tag(black_box(SENTENCE), true)))
-            .throughput(Throughput::Bytes(SENTENCE.len() as u32)),
+            .throughput(Throughput::Bytes(SENTENCE.len() as u64)),
     );
 
     c.bench(
@@ -62,7 +62,7 @@ fn criterion_benchmark(c: &mut Criterion) {
         .with_function("textrank", |b, i| {
             b.iter(|| TEXTRANK_EXTRACTOR.extract_tags(black_box(i), 3, Vec::new()))
         })
-        .throughput(|i| Throughput::Bytes(i.len() as u32)),
+        .throughput(|i| Throughput::Bytes(i.len() as u64)),
     );
 }
 
