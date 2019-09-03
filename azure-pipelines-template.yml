@@ -39,7 +39,7 @@ jobs:
     displayName: 'Rust/Cargo Version Information'
 
   # Check code style
-  - script: |
+  - bash: |
       if [[ "$rust_version" == "stable" ]]; then
         cargo fmt --all -- --check
       else
