@@ -40,7 +40,11 @@ jobs:
 
   # Check code style
   - script: |
-      cargo fmt --all -- --check
+      if [[ "$rust_version" == "stable" ]]; then
+        cargo fmt --all -- --check
+      else
+        cargo fmt --all -- --check || echo -e "\043#vso[task.logissue type=warning;] Code style check failed in Rust $(rust_version) toolchain"
+      fi
     displayName: 'Check Code Style'
 
   # Run unit tests
