@@ -28,12 +28,12 @@ required-features = ["tfidf", "textrank"]
 [dependencies]
 regex = "1.0"
 lazy_static = "1.0"
-phf = "0.7"
+phf = "0.8"
 hashbrown = "0.6.0"
 cedarwood = "0.4"
 
 [build-dependencies]
-phf_codegen = "0.7"
+phf_codegen = "0.8"
 
 [features]
 default = ["default-dict"]

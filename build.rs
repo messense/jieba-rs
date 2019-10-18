@@ -44,10 +44,9 @@ fn main() {
             let mut parts = word_prob.split(':');
             let word = parts.next().unwrap();
             let prob = parts.next().unwrap();
-            map.entry(word.to_string(), prob);
+            map.entry(word, prob);
         }
-        map.build(&mut file).unwrap();
-        write!(&mut file, ";\n").unwrap();
+        writeln!(&mut file, "{};", map.build()).unwrap();
         i += 1;
     }
     writeln!(&mut file, "#[allow(clippy::style)]").unwrap();
