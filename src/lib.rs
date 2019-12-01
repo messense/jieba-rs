@@ -81,7 +81,9 @@ pub use crate::keywords::textrank::TextRank;
 pub use crate::keywords::tfidf::TFIDF;
 #[cfg(any(feature = "tfidf", feature = "textrank"))]
 pub use crate::keywords::KeywordExtract;
+pub use crate::errors::Error;
 
+mod errors;
 mod hmm;
 #[cfg(any(feature = "tfidf", feature = "textrank"))]
 mod keywords;
@@ -233,7 +235,7 @@ impl Jieba {
     }
 
     /// Create a new instance with dict
-    pub fn with_dict<R: BufRead>(dict: &mut R) -> io::Result<Self> {
+    pub fn with_dict<R: BufRead>(dict: &mut R) -> Result<Self, Error> {
         let mut instance = Self::empty();
         instance.load_dict(dict)?;
         Ok(instance)
@@ -271,7 +273,7 @@ impl Jieba {
     }
 
     /// Load dictionary
-    pub fn load_dict<R: BufRead>(&mut self, dict: &mut R) -> io::Result<()> {
+    pub fn load_dict<R: BufRead>(&mut self, dict: &mut R) -> Result<(), Error> {
         let mut buf = String::new();
         self.total = 0;
         self.longest_word_len = 0;
@@ -285,7 +287,7 @@ impl Jieba {
                 }
 
                 let word = parts[0];
-                let freq = parts.get(1).map(|x| x.parse::<usize>().unwrap()).unwrap_or(0);
+                let freq = parts.get(1).map(|x| x.parse::<usize>()).unwrap_or(Ok(0))?;
                 let tag = parts.get(2).cloned().unwrap_or("");
 
                 let curr_word_len = word.chars().count();
@@ -1370,6 +1372,14 @@ mod tests {
                 }
             ]
         );
+    }
+
+    #[test]
+    fn test_userdict_error() {
+        let mut jieba = Jieba::empty();
+        let userdict = "出了 not_a_int";
+        let ret = jieba.load_dict(&mut BufReader::new(userdict.as_bytes()));
+        assert!(ret.is_err());
     }
 
     #[test]
