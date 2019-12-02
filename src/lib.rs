@@ -317,21 +317,14 @@ impl Jieba {
                     None => {
                         self.records
                             .push(Record::new(String::from(word), freq, String::from(tag)));
+                        let word_id = (self.records.len() - 1) as i32;
+                        self.cedar.update(word, word_id);
                     }
                 };
             }
             buf.clear();
         }
-
-        let key_values: Vec<(&str, i32)> = self
-            .records
-            .iter()
-            .enumerate()
-            .map(|(k, n)| (n.word.as_ref(), k as i32))
-            .collect();
         self.total = self.records.iter().map(|n| n.freq).sum();
-        self.cedar = Cedar::new();
-        self.cedar.build(&key_values);
 
         Ok(())
     }
