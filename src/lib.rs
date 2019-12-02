@@ -196,10 +196,23 @@ pub struct Tag<'a> {
     pub tag: &'a str,
 }
 
+#[derive(Debug, Clone)]
+struct Record {
+    word: String,
+    freq: usize,
+    tag: String,
+}
+
+impl Record {
+    fn new(word: String, freq: usize, tag: String) -> Self {
+        Self { word, freq, tag }
+    }
+}
+
 /// Jieba segmentation
 #[derive(Debug, Clone)]
 pub struct Jieba {
-    records: Vec<(String, usize, String)>,
+    records: Vec<Record>,
     cedar: Cedar,
     total: usize,
     longest_word_len: usize,
@@ -251,12 +264,12 @@ impl Jieba {
 
         match self.cedar.exact_match_search(word) {
             Some((word_id, _, _)) => {
-                let old_freq = self.records[word_id as usize].1;
-                self.records[word_id as usize].1 = freq;
+                let old_freq = self.records[word_id as usize].freq;
+                self.records[word_id as usize].freq = freq;
                 self.total += freq - old_freq;
             }
             None => {
-                self.records.push((String::from(word), freq, String::from(tag)));
+                self.records.push(Record::new(String::from(word), freq, String::from(tag)));
                 let word_id = (self.records.len() - 1) as i32;
 
                 self.cedar.update(word, word_id);
@@ -297,10 +310,10 @@ impl Jieba {
 
                 match self.cedar.exact_match_search(word) {
                     Some((word_id, _, _)) => {
-                        self.records[word_id as usize].1 = freq;
+                        self.records[word_id as usize].freq = freq;
                     }
                     None => {
-                        self.records.push((String::from(word), freq, String::from(tag)));
+                        self.records.push(Record::new(String::from(word), freq, String::from(tag)));
                     }
                 };
             }
@@ -311,9 +324,9 @@ impl Jieba {
             .records
             .iter()
             .enumerate()
-            .map(|(k, n)| (n.0.as_ref(), k as i32))
+            .map(|(k, n)| (n.word.as_ref(), k as i32))
             .collect();
-        self.total = self.records.iter().map(|n| n.1).sum();
+        self.total = self.records.iter().map(|n| n.freq).sum();
         self.cedar = Cedar::new();
         self.cedar.build(&key_values);
 
@@ -322,7 +335,7 @@ impl Jieba {
 
     fn get_word_freq(&self, word: &str, default: usize) -> usize {
         match self.cedar.exact_match_search(word) {
-            Some((word_id, _, _)) => self.records[word_id as usize].1,
+            Some((word_id, _, _)) => self.records[word_id as usize].freq,
             _ => default,
         }
     }
@@ -358,7 +371,7 @@ impl Jieba {
                     };
 
                     let freq = if let Some((word_id, _, _)) = self.cedar.exact_match_search(wfrag) {
-                        self.records[word_id as usize].1
+                        self.records[word_id as usize].freq
                     } else {
                         1
                     };
@@ -755,7 +768,7 @@ impl Jieba {
             .into_iter()
             .map(|word| {
                 if let Some((word_id, _, _)) = self.cedar.exact_match_search(word) {
-                    let t = &self.records[word_id as usize].2;
+                    let t = &self.records[word_id as usize].tag;
                     return Tag { word, tag: t };
                 }
                 let mut eng = 0;
