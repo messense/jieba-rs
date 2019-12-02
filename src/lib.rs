@@ -204,6 +204,7 @@ struct Record {
 }
 
 impl Record {
+    #[inline(always)]
     fn new(word: String, freq: usize, tag: String) -> Self {
         Self { word, freq, tag }
     }
