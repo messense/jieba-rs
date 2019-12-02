@@ -224,9 +224,6 @@ mod tests {
         let sentence = "小明硕士毕业于中国科学院计算所";
         let mut words = Vec::with_capacity(sentence.chars().count() / 2);
         cut(sentence, &mut words);
-        assert_eq!(
-            words,
-            vec!["小明", "硕士", "毕业于", "中国", "科学院", "计算", "所"]
-        );
+        assert_eq!(words, vec!["小明", "硕士", "毕业于", "中国", "科学院", "计算", "所"]);
     }
 }

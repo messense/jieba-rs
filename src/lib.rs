@@ -75,13 +75,13 @@ use std::io::{self, BufRead};
 use cedarwood::Cedar;
 use regex::{Match, Matches, Regex};
 
+pub use crate::errors::Error;
 #[cfg(feature = "textrank")]
 pub use crate::keywords::textrank::TextRank;
 #[cfg(feature = "tfidf")]
 pub use crate::keywords::tfidf::TFIDF;
 #[cfg(any(feature = "tfidf", feature = "textrank"))]
 pub use crate::keywords::KeywordExtract;
-pub use crate::errors::Error;
 
 mod errors;
 mod hmm;
@@ -270,7 +270,8 @@ impl Jieba {
                 self.total += freq - old_freq;
             }
             None => {
-                self.records.push(Record::new(String::from(word), freq, String::from(tag)));
+                self.records
+                    .push(Record::new(String::from(word), freq, String::from(tag)));
                 let word_id = (self.records.len() - 1) as i32;
 
                 self.cedar.update(word, word_id);
@@ -314,7 +315,8 @@ impl Jieba {
                         self.records[word_id as usize].freq = freq;
                     }
                     None => {
-                        self.records.push(Record::new(String::from(word), freq, String::from(tag)));
+                        self.records
+                            .push(Record::new(String::from(word), freq, String::from(tag)));
                     }
                 };
             }
@@ -920,15 +922,9 @@ mod tests {
     fn test_cut_for_search() {
         let jieba = Jieba::new();
         let words = jieba.cut_for_search("南京市长江大桥", true);
-        assert_eq!(
-            words,
-            vec!["南京", "京市", "南京市", "长江", "大桥", "长江大桥"]
-        );
+        assert_eq!(words, vec!["南京", "京市", "南京市", "长江", "大桥", "长江大桥"]);
 
-        let words = jieba.cut_for_search(
-            "小明硕士毕业于中国科学院计算所，后在日本京都大学深造",
-            true,
-        );
+        let words = jieba.cut_for_search("小明硕士毕业于中国科学院计算所，后在日本京都大学深造", true);
 
         // The python implementation silently filtered "，". but we includes it here in the output
         // to let the library user to decide their own filtering strategy
@@ -975,34 +971,29 @@ mod tests {
                     tag: "n"
                 },
                 Tag {
-                    word: "学院",
-                    tag: "n"
+                    word: "学院", tag: "n"
                 },
                 Tag {
                     word: "手扶拖拉机",
                     tag: "n"
                 },
                 Tag {
-                    word: "专业",
-                    tag: "n"
+                    word: "专业", tag: "n"
                 },
                 Tag { word: "的", tag: "uj" },
                 Tag { word: "。", tag: "x" },
                 Tag {
-                    word: "不用",
-                    tag: "v"
+                    word: "不用", tag: "v"
                 },
                 Tag {
-                    word: "多久",
-                    tag: "m"
+                    word: "多久", tag: "m"
                 },
                 Tag { word: "，", tag: "x" },
                 Tag { word: "我", tag: "r" },
                 Tag { word: "就", tag: "d" },
                 Tag { word: "会", tag: "v" },
                 Tag {
-                    word: "升职",
-                    tag: "v"
+                    word: "升职", tag: "v"
                 },
                 Tag {
                     word: "加薪",
@@ -1010,8 +1001,7 @@ mod tests {
                 },
                 Tag { word: "，", tag: "x" },
                 Tag {
-                    word: "当上",
-                    tag: "t"
+                    word: "当上", tag: "t"
                 },
                 Tag {
                     word: "CEO",
@@ -1019,31 +1009,24 @@ mod tests {
                 },
                 Tag { word: "，", tag: "x" },
                 Tag {
-                    word: "走上",
-                    tag: "v"
+                    word: "走上", tag: "v"
                 },
                 Tag {
-                    word: "人生",
-                    tag: "n"
+                    word: "人生", tag: "n"
                 },
                 Tag {
-                    word: "巅峰",
-                    tag: "n"
+                    word: "巅峰", tag: "n"
                 },
                 Tag { word: "。", tag: "x" }
             ]
         );
 
-        let tags = jieba.tag(
-            "今天纽约的天气真好啊，京华大酒店的张尧经理吃了一只北京烤鸭。",
-            true,
-        );
+        let tags = jieba.tag("今天纽约的天气真好啊，京华大酒店的张尧经理吃了一只北京烤鸭。", true);
         assert_eq!(
             tags,
             vec![
                 Tag {
-                    word: "今天",
-                    tag: "t"
+                    word: "今天", tag: "t"
                 },
                 Tag {
                     word: "纽约",
@@ -1051,12 +1034,10 @@ mod tests {
                 },
                 Tag { word: "的", tag: "uj" },
                 Tag {
-                    word: "天气",
-                    tag: "n"
+                    word: "天气", tag: "n"
                 },
                 Tag {
-                    word: "真好",
-                    tag: "d"
+                    word: "真好", tag: "d"
                 },
                 Tag { word: "啊", tag: "zg" },
                 Tag { word: "，", tag: "x" },
@@ -1070,18 +1051,15 @@ mod tests {
                 },
                 Tag { word: "的", tag: "uj" },
                 Tag {
-                    word: "张尧",
-                    tag: "x"
+                    word: "张尧", tag: "x"
                 }, // XXX: missing in dict
                 Tag {
-                    word: "经理",
-                    tag: "n"
+                    word: "经理", tag: "n"
                 },
                 Tag { word: "吃", tag: "v" },
                 Tag { word: "了", tag: "ul" },
                 Tag {
-                    word: "一只",
-                    tag: "m"
+                    word: "一只", tag: "m"
                 },
                 Tag {
                     word: "北京烤鸭",

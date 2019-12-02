@@ -6,7 +6,7 @@ pub enum Error {
     /// I/O errors
     Io(io::Error),
     /// Parse Int error
-    ParseInt(num::ParseIntError)
+    ParseInt(num::ParseIntError),
 }
 
 impl From<io::Error> for Error {
