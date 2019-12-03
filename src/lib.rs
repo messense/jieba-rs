@@ -302,7 +302,13 @@ impl Jieba {
                 }
 
                 let word = parts[0];
-                let freq = parts.get(1).map(|x| x.parse::<usize>()).unwrap_or(Ok(0))?;
+                let freq = parts
+                    .get(1)
+                    .map(|x| {
+                        x.parse::<usize>()
+                            .map_err(|e| Error::InvalidDictEntry(format!("{}", e)))
+                    })
+                    .unwrap_or(Ok(0))?;
                 let tag = parts.get(2).cloned().unwrap_or("");
 
                 let curr_word_len = word.chars().count();
