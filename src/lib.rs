@@ -267,7 +267,9 @@ impl Jieba {
             Some((word_id, _, _)) => {
                 let old_freq = self.records[word_id as usize].freq;
                 self.records[word_id as usize].freq = freq;
-                self.total += freq - old_freq;
+
+                self.total += freq;
+                self.total -= old_freq;
             }
             None => {
                 self.records
@@ -1392,6 +1394,16 @@ mod tests {
         jieba.load_dict(&mut BufReader::new(userdict.as_bytes())).unwrap();
         // Now it's significant enough
         assert_eq!(jieba.suggest_freq("中出"), 500)
+    }
+
+    #[test]
+    fn test_custom_lower_freq() {
+        let mut jieba = Jieba::new();
+
+        jieba.add_word("测试", Some(2445), None);
+        jieba.add_word("测试", Some(10), None);
+        let words = jieba.cut("测试", false);
+        assert_eq!(words, vec!["测试"]);
     }
 
     #[test]
