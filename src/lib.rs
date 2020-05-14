@@ -6,7 +6,7 @@
 //!
 //! ```toml
 //! [dependencies]
-//! jieba-rs = "0.4"
+//! jieba-rs = "0.5"
 //! ```
 //!
 //! then you are good to go. If you are using Rust 2015 you have to ``extern crate jieba_rs`` to your crate root as well.
@@ -63,7 +63,7 @@
 //!
 //! ```toml
 //! [dependencies]
-//! jieba-rs = { version = "0.4", features = ["tfidf", "textrank"] }
+//! jieba-rs = { version = "0.5", features = ["tfidf", "textrank"] }
 //! ```
 //!
 
