@@ -16,6 +16,7 @@ all-features = true
 [dev-dependencies]
 criterion = "0.3"
 rand = "0.7"
+wasm-bindgen-test = "0.3.0"
 
 [target.'cfg(unix)'.dev-dependencies]
 jemallocator = "0.3.2"
