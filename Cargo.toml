@@ -30,7 +30,7 @@ required-features = ["tfidf", "textrank"]
 regex = "1.0"
 lazy_static = "1.0"
 phf = "0.8"
-hashbrown = "0.7"
+hashbrown = "0.8"
 cedarwood = "0.4"
 
 [build-dependencies]
