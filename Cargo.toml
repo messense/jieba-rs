@@ -32,6 +32,7 @@ lazy_static = "1.0"
 phf = "0.8"
 hashbrown = "0.8"
 cedarwood = "0.4"
+ordered-float = { version = "2.0", optional = true }
 
 [build-dependencies]
 phf_codegen = "0.8"
@@ -39,8 +40,8 @@ phf_codegen = "0.8"
 [features]
 default = ["default-dict"]
 default-dict = []
-tfidf = []
-textrank = []
+tfidf = ["ordered-float"]
+textrank = ["ordered-float"]
 
 [workspace]
 members = [

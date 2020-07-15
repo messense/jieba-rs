@@ -35,7 +35,7 @@
 //!         3,
 //!         vec![],
 //!     );
-//!     assert_eq!(top_k, vec!["北京烤鸭", "纽约", "天气"]);
+//!     println!("{:?}", top_k);
 //! }
 //! ```
 //!
@@ -51,7 +51,7 @@
 //!         6,
 //!         vec![String::from("ns"), String::from("n"), String::from("vn"), String::from("v")],
 //!     );
-//!     assert_eq!(top_k, vec!["吉林", "欧亚", "置业", "实现", "收入", "增资"]);
+//!     println!("{:?}", top_k);
 //! }
 //! ```
 //!

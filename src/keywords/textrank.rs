@@ -1,8 +1,11 @@
-use super::{KeywordExtract, STOP_WORDS};
-use crate::Jieba;
-use hashbrown::HashMap;
 use std::cmp::Ordering;
 use std::collections::{BTreeSet, BinaryHeap};
+
+use hashbrown::HashMap;
+use ordered_float::OrderedFloat;
+
+use super::{Keyword, KeywordExtract, STOP_WORDS};
+use crate::Jieba;
 
 type Weight = f64;
 
@@ -82,7 +85,7 @@ impl<'a> TextRank<'a> {
 }
 
 impl<'a> KeywordExtract for TextRank<'a> {
-    fn extract_tags(&self, sentence: &str, top_k: usize, allowed_pos: Vec<String>) -> Vec<String> {
+    fn extract_tags(&self, sentence: &str, top_k: usize, allowed_pos: Vec<String>) -> Vec<Keyword> {
         let tags = self.jieba.tag(sentence, true);
         let mut allowed_pos_set = BTreeSet::new();
 
@@ -91,7 +94,7 @@ impl<'a> KeywordExtract for TextRank<'a> {
         }
 
         let mut word2id: HashMap<String, usize> = HashMap::new();
-        let mut unique_words: Vec<String> = Vec::new();
+        let mut unique_words = Vec::new();
         for t in &tags {
             if !allowed_pos_set.is_empty() && !allowed_pos_set.contains(t.tag) {
                 continue;
@@ -143,7 +146,7 @@ impl<'a> KeywordExtract for TextRank<'a> {
         let mut heap = BinaryHeap::new();
         for (k, v) in ranking_vector.iter().enumerate() {
             heap.push(HeapNode {
-                rank: (v * 1e10) as u64,
+                rank: OrderedFloat(v * 1e10),
                 word_id: k,
             });
 
@@ -152,10 +155,13 @@ impl<'a> KeywordExtract for TextRank<'a> {
             }
         }
 
-        let mut res: Vec<String> = Vec::new();
+        let mut res = Vec::new();
         for _ in 0..top_k {
             if let Some(w) = heap.pop() {
-                res.push(unique_words[w.word_id].clone());
+                res.push(Keyword {
+                    keyword: unique_words[w.word_id].clone(),
+                    weight: w.rank.into_inner(),
+                });
             }
         }
 
@@ -166,7 +172,7 @@ impl<'a> KeywordExtract for TextRank<'a> {
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 struct HeapNode {
-    rank: u64, //using u64 but not f64 so that it conforms to Ord
+    rank: OrderedFloat<f64>,
     word_id: usize,
 }
 
@@ -223,13 +229,19 @@ mod tests {
             6,
             vec![String::from("ns"), String::from("n"), String::from("vn"), String::from("v")],
         );
-        assert_eq!(top_k, vec!["吉林", "欧亚", "置业", "实现", "收入", "增资"]);
+        assert_eq!(
+            top_k.iter().map(|x| &x.keyword).collect::<Vec<&String>>(),
+            vec!["吉林", "欧亚", "置业", "实现", "收入", "增资"]
+        );
 
         top_k = keyword_extractor.extract_tags(
             "It is nice weather in New York City. and今天纽约的天气真好啊，and京华大酒店的张尧经理吃了一只北京烤鸭。and后天纽约的天气不好，and昨天纽约的天气也不好，and北京烤鸭真好吃",
             3,
             vec![],
         );
-        assert_eq!(top_k, vec!["纽约", "天气", "不好"]);
+        assert_eq!(
+            top_k.iter().map(|x| &x.keyword).collect::<Vec<&String>>(),
+            vec!["纽约", "天气", "不好"]
+        );
     }
 }
