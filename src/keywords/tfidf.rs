@@ -36,6 +36,7 @@ pub struct TFIDF<'a> {
     jieba: &'a Jieba,
     idf_dict: HashMap<String, f64>,
     median_idf: f64,
+    stop_words: BTreeSet<String>,
 }
 
 impl<'a> TFIDF<'a> {
@@ -44,6 +45,7 @@ impl<'a> TFIDF<'a> {
             jieba,
             idf_dict: HashMap::new(),
             median_idf: 0.0,
+            stop_words: STOP_WORDS.clone(),
         };
 
         let mut default_dict = BufReader::new(DEFAULT_IDF.as_bytes());
@@ -78,6 +80,34 @@ impl<'a> TFIDF<'a> {
 
         Ok(())
     }
+
+    /// Add a new stop word
+    pub fn add_stop_word(&mut self, word: String) -> bool {
+        self.stop_words.insert(word)
+    }
+
+    /// Remove an existing stop word
+    pub fn remove_stop_word(&mut self, word: &str) -> bool {
+        self.stop_words.remove(word)
+    }
+
+    /// Replace all stop words with new stop words set
+    pub fn set_stop_words(&mut self, stop_words: BTreeSet<String>) {
+        self.stop_words = stop_words
+    }
+
+    #[inline]
+    fn filter(&self, s: &str) -> bool {
+        if s.chars().count() < 2 {
+            return false;
+        }
+
+        if self.stop_words.contains(&s.to_lowercase()) {
+            return false;
+        }
+
+        true
+    }
 }
 
 impl<'a> KeywordExtract for TFIDF<'a> {
@@ -95,7 +125,7 @@ impl<'a> KeywordExtract for TFIDF<'a> {
                 continue;
             }
 
-            if !filter(t.word) {
+            if !self.filter(t.word) {
                 continue;
             }
 
@@ -130,19 +160,6 @@ impl<'a> KeywordExtract for TFIDF<'a> {
         res.reverse();
         res
     }
-}
-
-#[inline]
-fn filter(s: &str) -> bool {
-    if s.chars().count() < 2 {
-        return false;
-    }
-
-    if STOP_WORDS.contains(&s.to_lowercase()) {
-        return false;
-    }
-
-    true
 }
 
 #[cfg(test)]

@@ -31,5 +31,5 @@ pub struct Keyword {
 }
 
 pub trait KeywordExtract {
-    fn extract_tags<'a>(&'a self, _: &'a str, _: usize, _: Vec<String>) -> Vec<Keyword>;
+    fn extract_tags(&self, _: &str, _: usize, _: Vec<String>) -> Vec<Keyword>;
 }

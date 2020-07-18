@@ -76,11 +76,44 @@ impl StateDiagram {
 pub struct TextRank<'a> {
     jieba: &'a Jieba,
     span: usize,
+    stop_words: BTreeSet<String>,
 }
 
 impl<'a> TextRank<'a> {
     pub fn new_with_jieba(jieba: &'a Jieba) -> Self {
-        TextRank { jieba, span: 5 }
+        TextRank {
+            jieba,
+            span: 5,
+            stop_words: STOP_WORDS.clone(),
+        }
+    }
+
+    /// Add a new stop word
+    pub fn add_stop_word(&mut self, word: String) -> bool {
+        self.stop_words.insert(word)
+    }
+
+    /// Remove an existing stop word
+    pub fn remove_stop_word(&mut self, word: &str) -> bool {
+        self.stop_words.remove(word)
+    }
+
+    /// Replace all stop words with new stop words set
+    pub fn set_stop_words(&mut self, stop_words: BTreeSet<String>) {
+        self.stop_words = stop_words
+    }
+
+    #[inline]
+    fn filter(&self, s: &str) -> bool {
+        if s.chars().count() < 2 {
+            return false;
+        }
+
+        if self.stop_words.contains(&s.to_lowercase()) {
+            return false;
+        }
+
+        true
     }
 }
 
@@ -112,7 +145,7 @@ impl<'a> KeywordExtract for TextRank<'a> {
                 continue;
             }
 
-            if !filter(t.word) {
+            if !self.filter(t.word) {
                 continue;
             }
 
@@ -125,7 +158,7 @@ impl<'a> KeywordExtract for TextRank<'a> {
                     continue;
                 }
 
-                if !filter(tags[j].word) {
+                if !self.filter(tags[j].word) {
                     continue;
                 }
 
@@ -189,19 +222,6 @@ impl PartialOrd for HeapNode {
     fn partial_cmp(&self, other: &HeapNode) -> Option<Ordering> {
         Some(self.cmp(other))
     }
-}
-
-#[inline]
-fn filter(s: &str) -> bool {
-    if s.chars().count() < 2 {
-        return false;
-    }
-
-    if STOP_WORDS.contains(&s.to_lowercase()) {
-        return false;
-    }
-
-    true
 }
 
 #[cfg(test)]
