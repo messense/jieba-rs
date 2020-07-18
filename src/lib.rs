@@ -297,8 +297,10 @@ impl Jieba {
         self.total = 0;
         self.longest_word_len = 0;
 
+        let mut line_no = 0;
         while dict.read_line(&mut buf)? > 0 {
             {
+                line_no += 1;
                 let parts: Vec<&str> = buf.trim().split_whitespace().collect();
                 if parts.is_empty() {
                     // Skip empty lines
@@ -309,8 +311,12 @@ impl Jieba {
                 let freq = parts
                     .get(1)
                     .map(|x| {
-                        x.parse::<usize>()
-                            .map_err(|e| Error::InvalidDictEntry(format!("{}", e)))
+                        x.parse::<usize>().map_err(|e| {
+                            Error::InvalidDictEntry(format!(
+                                "line {} `{}` frequency {} is not a valid integer: {}",
+                                line_no, buf, x, e
+                            ))
+                        })
                     })
                     .unwrap_or(Ok(0))?;
                 let tag = parts.get(2).cloned().unwrap_or("");
