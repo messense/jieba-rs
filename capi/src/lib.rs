@@ -236,7 +236,10 @@ pub unsafe extern "C" fn jieba_tfidf_extract(
     };
 
     let words = (*tfidf).extract_tags(&s, top_k, allowed_pos);
-    let mut c_words: Vec<FfiStr> = words.into_iter().map(|x| FfiStr::from_string(x.to_string())).collect();
+    let mut c_words: Vec<FfiStr> = words
+        .into_iter()
+        .map(|x| FfiStr::from_string(x.keyword.to_string()))
+        .collect();
     let words_len = c_words.len();
     let ptr = c_words.as_mut_ptr();
     mem::forget(c_words);
@@ -277,7 +280,10 @@ pub unsafe extern "C" fn jieba_textrank_extract(
 
     let textrank = TextRank::new_with_jieba(&*jieba);
     let words = textrank.extract_tags(&s, top_k, allowed_pos);
-    let mut c_words: Vec<FfiStr> = words.into_iter().map(|x| FfiStr::from_string(x.to_string())).collect();
+    let mut c_words: Vec<FfiStr> = words
+        .into_iter()
+        .map(|x| FfiStr::from_string(x.keyword.to_string()))
+        .collect();
     let words_len = c_words.len();
     let ptr = c_words.as_mut_ptr();
     mem::forget(c_words);

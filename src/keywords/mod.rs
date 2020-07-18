@@ -23,6 +23,13 @@ lazy_static! {
     };
 }
 
+/// Keyword with weight
+#[derive(Debug, Clone)]
+pub struct Keyword {
+    pub keyword: String,
+    pub weight: f64,
+}
+
 pub trait KeywordExtract {
-    fn extract_tags<'a>(&'a self, _: &'a str, _: usize, _: Vec<String>) -> Vec<String>;
+    fn extract_tags(&self, _: &str, _: usize, _: Vec<String>) -> Vec<Keyword>;
 }
