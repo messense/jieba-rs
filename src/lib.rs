@@ -81,7 +81,7 @@ pub use crate::keywords::textrank::TextRank;
 #[cfg(feature = "tfidf")]
 pub use crate::keywords::tfidf::TFIDF;
 #[cfg(any(feature = "tfidf", feature = "textrank"))]
-pub use crate::keywords::KeywordExtract;
+pub use crate::keywords::{Keyword, KeywordExtract};
 
 mod errors;
 mod hmm;
