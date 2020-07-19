@@ -95,7 +95,7 @@ static DEFAULT_DICT: &str = include_str!("data/dict.txt");
 use sparse_dag::StaticSparseDAG;
 
 lazy_static! {
-    static ref RE_HAN_DEFAULT: Regex = Regex::new(r"([\u{3400}-\u{4DBF}\u{4E00}-\u{9FFF}\u{F900}-\u{FAFF}\u{20000}-\u{2A6DF}\u{2A700}-\u{2B73F}\u{2B740}-\u{2B81F}\u{2B820}-\u{2CEAF}\u{2CEB0}-\u{2EBEF}\u{2F800}-\u{2FA1F}a-zA-Z0-9+#&\._%]+)").unwrap();
+    static ref RE_HAN_DEFAULT: Regex = Regex::new(r"([\u{3400}-\u{4DBF}\u{4E00}-\u{9FFF}\u{F900}-\u{FAFF}\u{20000}-\u{2A6DF}\u{2A700}-\u{2B73F}\u{2B740}-\u{2B81F}\u{2B820}-\u{2CEAF}\u{2CEB0}-\u{2EBEF}\u{2F800}-\u{2FA1F}a-zA-Z0-9+#&\._%\-]+)").unwrap();
     static ref RE_SKIP_DEAFULT: Regex = Regex::new(r"(\r\n|\s)").unwrap();
     static ref RE_HAN_CUT_ALL: Regex = Regex::new(r"([\u{3400}-\u{4DBF}\u{4E00}-\u{9FFF}\u{F900}-\u{FAFF}\u{20000}-\u{2A6DF}\u{2A700}-\u{2B73F}\u{2B740}-\u{2B81F}\u{2B820}-\u{2CEAF}\u{2CEB0}-\u{2EBEF}\u{2F800}-\u{2FA1F}]+)").unwrap();
     static ref RE_SKIP_CUT_ALL: Regex = Regex::new(r"[^a-zA-Z0-9+#\n]").unwrap();
@@ -1424,5 +1424,13 @@ mod tests {
 
         let words = jieba.cut("讥䶯䶰䶱䶲䶳䶴䶵𦡦", false);
         assert_eq!(words, vec!["讥䶯䶰䶱䶲䶳", "䶴䶵𦡦"]);
+    }
+
+    #[test]
+    fn test_add_custom_word_with_underscrore() {
+        let mut jieba = Jieba::empty();
+        jieba.add_word("田-女士", Some(42), Some("n"));
+        let words = jieba.cut("市民田-女士急匆匆", false);
+        assert_eq!(words, vec!["市", "民", "田-女士", "急", "匆", "匆"]);
     }
 }
