@@ -53,6 +53,11 @@ cargo bench --all-features
 * [优化 jieba-rs 中文分词性能评测](https://blog.paulme.ng/posts/2019-07-01-%E4%BC%98%E5%8C%96-jieba-rs-%E4%B8%AD%E6%96%87%E5%88%86%E8%AF%8D-%E6%80%A7%E8%83%BD%E8%AF%84%E6%B5%8B%EF%BC%88%E5%BF%AB%E4%BA%8E-cppjieba-33percent%29.html)
 * [最佳化 jieba-rs 中文斷詞性能測試](https://blog.paulme.ng/posts/2019-07-01-%E6%9C%80%E4%BD%B3%E5%8C%96jieba-rs%E4%B8%AD%E6%96%87%E6%96%B7%E8%A9%9E%E6%80%A7%E8%83%BD%E6%B8%AC%E8%A9%A6%28%E5%BF%AB%E4%BA%8Ecppjieba-33%25%29.html)
 
+## `jieba-rs` bindings
+
+* [`@node-rs/jieba` NodeJS binding](https://github.com/napi-rs/node-rs/tree/master/packages/jieba)
+* [`jieba-php` PHP binding](https://github.com/binaryoung/jieba-php)
+
 ## License
 
 This work is released under the MIT license. A copy of the license is provided in the [LICENSE](./LICENSE) file.
