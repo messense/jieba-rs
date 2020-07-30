@@ -5,7 +5,7 @@ authors = ["messense <messense@icloud.com>"]
 edition = "2018"
 
 [dependencies]
-jieba-rs = { version = "0.6.0-alpha.1", path = "../", features = ["textrank", "tfidf"] }
+jieba-rs = { version = "0.6.0", path = "../", features = ["textrank", "tfidf"] }
 c_fixed_string = "0.2.0"
 
 [lib]
