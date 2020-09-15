@@ -57,6 +57,7 @@ cargo bench --all-features
 
 * [`@node-rs/jieba` NodeJS binding](https://github.com/napi-rs/node-rs/tree/master/packages/jieba)
 * [`jieba-php` PHP binding](https://github.com/binaryoung/jieba-php)
+* [`rjieba-py` Python binding](https://github.com/messense/rjieba-py)
 
 ## License
 
