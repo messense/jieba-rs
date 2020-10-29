@@ -58,6 +58,8 @@ cargo bench --all-features
 * [`@node-rs/jieba` NodeJS binding](https://github.com/napi-rs/node-rs/tree/master/packages/jieba)
 * [`jieba-php` PHP binding](https://github.com/binaryoung/jieba-php)
 * [`rjieba-py` Python binding](https://github.com/messense/rjieba-py)
+* [`cang-jie` Chinese tokenizer for tantivy](https://github.com/DCjanus/cang-jie)
+* [`tantivy-jieba` An adapter that bridges between tantivy and jieba-rs](https://github.com/jiegec/tantivy-jieba)
 
 ## License
 
