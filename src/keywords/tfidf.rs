@@ -2,10 +2,10 @@ use std::cmp::Ordering;
 use std::collections::{BTreeSet, BinaryHeap};
 use std::io::{self, BufRead, BufReader};
 
-use hashbrown::HashMap;
 use ordered_float::OrderedFloat;
 
 use super::{Keyword, KeywordExtract, STOP_WORDS};
+use crate::FxHashMap as HashMap;
 use crate::Jieba;
 
 static DEFAULT_IDF: &str = include_str!("../data/idf.txt");
@@ -43,7 +43,7 @@ impl<'a> TFIDF<'a> {
     pub fn new_with_jieba(jieba: &'a Jieba) -> Self {
         let mut instance = TFIDF {
             jieba,
-            idf_dict: HashMap::new(),
+            idf_dict: HashMap::default(),
             median_idf: 0.0,
             stop_words: STOP_WORDS.clone(),
         };
@@ -119,7 +119,7 @@ impl<'a> KeywordExtract for TFIDF<'a> {
             allowed_pos_set.insert(s);
         }
 
-        let mut term_freq: HashMap<String, u64> = HashMap::new();
+        let mut term_freq: HashMap<String, u64> = HashMap::default();
         for t in &tags {
             if !allowed_pos_set.is_empty() && !allowed_pos_set.contains(t.tag) {
                 continue;

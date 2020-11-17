@@ -1,4 +1,4 @@
-use hashbrown::HashMap;
+use crate::FxHashMap as HashMap;
 
 pub(crate) struct StaticSparseDAG {
     array: Vec<usize>,
@@ -35,7 +35,7 @@ impl StaticSparseDAG {
     pub(crate) fn with_size_hint(hint: usize) -> Self {
         StaticSparseDAG {
             array: Vec::with_capacity(hint * 5),
-            start_pos: HashMap::new(),
+            start_pos: HashMap::default(),
             size_hint_for_iterator: 0,
             curr_insertion_len: 0,
         }

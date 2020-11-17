@@ -73,7 +73,10 @@ use std::cmp::Ordering;
 use std::io::BufRead;
 
 use cedarwood::Cedar;
+use hashbrown::HashMap;
 use regex::{Match, Matches, Regex};
+
+pub(crate) type FxHashMap<K, V> = HashMap<K, V, fxhash::FxBuildHasher>;
 
 pub use crate::errors::Error;
 #[cfg(feature = "textrank")]

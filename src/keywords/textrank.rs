@@ -1,10 +1,10 @@
 use std::cmp::Ordering;
 use std::collections::{BTreeSet, BinaryHeap};
 
-use hashbrown::HashMap;
 use ordered_float::OrderedFloat;
 
 use super::{Keyword, KeywordExtract, STOP_WORDS};
+use crate::FxHashMap as HashMap;
 use crate::Jieba;
 
 type Weight = f64;
@@ -126,7 +126,7 @@ impl<'a> KeywordExtract for TextRank<'a> {
             allowed_pos_set.insert(s);
         }
 
-        let mut word2id: HashMap<String, usize> = HashMap::new();
+        let mut word2id: HashMap<String, usize> = HashMap::default();
         let mut unique_words = Vec::new();
         for t in &tags {
             if !allowed_pos_set.is_empty() && !allowed_pos_set.contains(t.tag) {
@@ -139,7 +139,7 @@ impl<'a> KeywordExtract for TextRank<'a> {
             }
         }
 
-        let mut cooccurence: HashMap<(usize, usize), usize> = HashMap::new();
+        let mut cooccurence: HashMap<(usize, usize), usize> = HashMap::default();
         for (i, t) in tags.iter().enumerate() {
             if !allowed_pos_set.is_empty() && !allowed_pos_set.contains(t.tag) {
                 continue;
