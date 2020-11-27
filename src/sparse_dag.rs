@@ -33,9 +33,11 @@ impl<'a> Iterator for EdgeIter<'a> {
 
 impl StaticSparseDAG {
     pub(crate) fn with_size_hint(hint: usize) -> Self {
+        let mut start_pos = HashMap::default();
+        start_pos.reserve(hint);
         StaticSparseDAG {
             array: Vec::with_capacity(hint * 5),
-            start_pos: HashMap::default(),
+            start_pos,
             size_hint_for_iterator: 0,
             curr_insertion_len: 0,
         }
