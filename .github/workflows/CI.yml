@@ -64,12 +64,7 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: test
-          args: --all-features --all
-      - name: Test benchmarks
-        uses: actions-rs/cargo@v1
-        with:
-          command: bench
-          args: --all-features -- --test
+          args: --all-features --all --benches
 
   wasm-test:
     name: Test Suite - WASM
