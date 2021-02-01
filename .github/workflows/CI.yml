@@ -66,22 +66,6 @@ jobs:
           command: test
           args: --all-features --all --benches
 
-  wasm-test:
-    name: Test Suite - WASM
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v2
-      - name: Cache cargo build
-        uses: actions/cache@v1
-        with:
-          path: target
-          key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('**/Cargo.lock') }}
-      - name: Install wasm-pack
-        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
-      - run: wasm-pack test --node
-      - run: wasm-pack test --headless --chrome
-      - run: wasm-pack test --headless --firefox
-
   codecov:
     name: Code Coverage
     runs-on: ubuntu-latest
