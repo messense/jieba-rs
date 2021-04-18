@@ -24,6 +24,7 @@
 //! ```
 //!
 //! ```rust
+//! # #[cfg(feature = "tfidf")] {
 //! use jieba_rs::Jieba;
 //! use jieba_rs::{TFIDF, KeywordExtract};
 //!
@@ -37,9 +38,11 @@
 //!     );
 //!     println!("{:?}", top_k);
 //! }
+//! # }
 //! ```
 //!
 //! ```rust
+//! # #[cfg(feature = "textrank")] {
 //! use jieba_rs::Jieba;
 //! use jieba_rs::{TextRank, KeywordExtract};
 //!
@@ -53,6 +56,7 @@
 //!     );
 //!     println!("{:?}", top_k);
 //! }
+//! # }
 //! ```
 //!
 //! ## Enabling Additional Features
