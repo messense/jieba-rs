@@ -1,8 +1,6 @@
-use lazy_static::lazy_static;
-
 use std::cmp::Ordering;
 
-use phf;
+use lazy_static::lazy_static;
 use regex::Regex;
 
 use crate::SplitMatches;

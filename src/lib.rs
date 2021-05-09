@@ -16,11 +16,9 @@
 //! ```rust
 //! use jieba_rs::Jieba;
 //!
-//! fn main() {
-//!     let jieba = Jieba::new();
-//!     let words = jieba.cut("我们中出了一个叛徒", false);
-//!     assert_eq!(words, vec!["我们", "中", "出", "了", "一个", "叛徒"]);
-//! }
+//! let jieba = Jieba::new();
+//! let words = jieba.cut("我们中出了一个叛徒", false);
+//! assert_eq!(words, vec!["我们", "中", "出", "了", "一个", "叛徒"]);
 //! ```
 //!
 //! ```rust
@@ -408,8 +406,7 @@ impl Jieba {
     }
 
     fn dag(&self, sentence: &str, dag: &mut StaticSparseDAG) {
-        let mut iter = sentence.char_indices().peekable();
-        while let Some((byte_start, _)) = iter.next() {
+        for (byte_start, _) in sentence.char_indices().peekable() {
             dag.start(byte_start);
             let haystack = &sentence[byte_start..];
 
@@ -491,7 +488,7 @@ impl Jieba {
         route.clear();
     }
 
-    #[allow(non_snake_case)]
+    #[allow(non_snake_case, clippy::too_many_arguments)]
     fn cut_dag_hmm<'a>(
         &self,
         sentence: &'a str,

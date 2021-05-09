@@ -10,7 +10,7 @@ fn main() {
     let hmm_file = File::open("src/data/hmm.model").expect("cannot open hmm.model");
     let mut file = BufWriter::new(File::create(&path).unwrap());
     let reader = BufReader::new(hmm_file);
-    let mut lines = reader.lines().map(|x| x.unwrap()).skip_while(|x| x.starts_with("#"));
+    let mut lines = reader.lines().map(|x| x.unwrap()).skip_while(|x| x.starts_with('#'));
     let prob_start = lines.next().unwrap();
     writeln!(&mut file, "#[allow(clippy::style)]").unwrap();
     write!(&mut file, "static INITIAL_PROBS: StatusSet = [").unwrap();
@@ -22,19 +22,19 @@ fn main() {
     write!(&mut file, "static TRANS_PROBS: [StatusSet; 4] = [").unwrap();
     for line in lines
         .by_ref()
-        .skip_while(|x| x.starts_with("#"))
-        .take_while(|x| !x.starts_with("#"))
+        .skip_while(|x| x.starts_with('#'))
+        .take_while(|x| !x.starts_with('#'))
     {
         write!(&mut file, "[").unwrap();
         for prob in line.split(' ') {
             write!(&mut file, "{}, ", prob).unwrap();
         }
-        write!(&mut file, "],\n").unwrap();
+        writeln!(&mut file, "],").unwrap();
     }
     write!(&mut file, "];\n\n").unwrap();
     let mut i = 0;
     for line in lines {
-        if line.starts_with("#") {
+        if line.starts_with('#') {
             continue;
         }
         writeln!(&mut file, "#[allow(clippy::style)]").unwrap();
@@ -50,5 +50,5 @@ fn main() {
         i += 1;
     }
     writeln!(&mut file, "#[allow(clippy::style)]").unwrap();
-    write!(&mut file, "static EMIT_PROBS: [&'static phf::Map<&'static str, f64>; 4] = [&EMIT_PROB_0, &EMIT_PROB_1, &EMIT_PROB_2, &EMIT_PROB_3];\n").unwrap();
+    writeln!(&mut file, "static EMIT_PROBS: [&'static phf::Map<&'static str, f64>; 4] = [&EMIT_PROB_0, &EMIT_PROB_1, &EMIT_PROB_2, &EMIT_PROB_3];").unwrap();
 }
