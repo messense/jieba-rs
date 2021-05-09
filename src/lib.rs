@@ -308,42 +308,38 @@ impl Jieba {
         while dict.read_line(&mut buf)? > 0 {
             {
                 line_no += 1;
-                let parts: Vec<&str> = buf.trim().split_whitespace().collect();
-                if parts.is_empty() {
-                    // Skip empty lines
-                    continue;
-                }
-
-                let word = parts[0];
-                let freq = parts
-                    .get(1)
-                    .map(|x| {
-                        x.parse::<usize>().map_err(|e| {
-                            Error::InvalidDictEntry(format!(
-                                "line {} `{}` frequency {} is not a valid integer: {}",
-                                line_no, buf, x, e
-                            ))
+                let mut iter = buf.trim().split_whitespace();
+                if let Some(word) = iter.next() {
+                    let freq = iter
+                        .next()
+                        .map(|x| {
+                            x.parse::<usize>().map_err(|e| {
+                                Error::InvalidDictEntry(format!(
+                                    "line {} `{}` frequency {} is not a valid integer: {}",
+                                    line_no, buf, x, e
+                                ))
+                            })
                         })
-                    })
-                    .unwrap_or(Ok(0))?;
-                let tag = parts.get(2).cloned().unwrap_or("");
+                        .unwrap_or(Ok(0))?;
+                    let tag = iter.next().unwrap_or("");
 
-                let curr_word_len = word.chars().count();
-                if self.longest_word_len < curr_word_len {
-                    self.longest_word_len = curr_word_len;
+                    let curr_word_len = word.chars().count();
+                    if self.longest_word_len < curr_word_len {
+                        self.longest_word_len = curr_word_len;
+                    }
+
+                    match self.cedar.exact_match_search(word) {
+                        Some((word_id, _, _)) => {
+                            self.records[word_id as usize].freq = freq;
+                        }
+                        None => {
+                            self.records
+                                .push(Record::new(String::from(word), freq, String::from(tag)));
+                            let word_id = (self.records.len() - 1) as i32;
+                            self.cedar.update(word, word_id);
+                        }
+                    };
                 }
-
-                match self.cedar.exact_match_search(word) {
-                    Some((word_id, _, _)) => {
-                        self.records[word_id as usize].freq = freq;
-                    }
-                    None => {
-                        self.records
-                            .push(Record::new(String::from(word), freq, String::from(tag)));
-                        let word_id = (self.records.len() - 1) as i32;
-                        self.cedar.update(word, word_id);
-                    }
-                };
             }
             buf.clear();
         }
