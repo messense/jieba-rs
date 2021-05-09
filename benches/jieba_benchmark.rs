@@ -17,6 +17,16 @@ lazy_static! {
 static SENTENCE: &str = "我是拖拉机学院手扶拖拉机专业的。不用多久，我就会升职加薪，当上CEO，走上人生巅峰。";
 
 fn criterion_benchmark(c: &mut Criterion) {
+    let mut group = c.benchmark_group("jieba");
+    let dict_len = include_bytes!("../src/data/dict.txt").len() as u64;
+    group.throughput(Throughput::Bytes(dict_len));
+    group.bench_function("new", |b| {
+        b.iter(|| {
+            black_box(Jieba::new());
+        })
+    });
+    group.finish();
+
     let mut group = c.benchmark_group("jieba cut");
     group.throughput(Throughput::Bytes(SENTENCE.len() as u64));
     group.bench_function("no hmm", |b| b.iter(|| JIEBA.cut(black_box(SENTENCE), false)));
