@@ -92,11 +92,13 @@ mod errors;
 mod hmm;
 #[cfg(any(feature = "tfidf", feature = "textrank"))]
 mod keywords;
+mod load_default;
 mod sparse_dag;
 
 #[cfg(feature = "default-dict")]
 static DEFAULT_DICT: &str = include_str!("data/dict.txt");
 
+use load_default::LoadDefault;
 use sparse_dag::StaticSparseDAG;
 
 lazy_static! {
@@ -247,12 +249,7 @@ impl Jieba {
     /// Requires `default-dict` feature to be enabled.
     #[cfg(feature = "default-dict")]
     pub fn new() -> Self {
-        use std::io::BufReader;
-
-        let mut instance = Self::empty();
-        let mut default_dict = BufReader::new(DEFAULT_DICT.as_bytes());
-        instance.load_dict(&mut default_dict).unwrap();
-        instance
+        Self::empty().load_default(DEFAULT_DICT)
     }
 
     /// Create a new instance with dict
@@ -294,6 +291,33 @@ impl Jieba {
         }
 
         freq
+    }
+
+    fn load_default(mut self, s: &'static str) -> Self {
+        self.total = 0;
+        self.longest_word_len = 0;
+
+        for (word, freq, tag) in LoadDefault::new(s) {
+            let curr_word_len = word.chars().count();
+
+            if self.longest_word_len < curr_word_len {
+                self.longest_word_len = curr_word_len;
+            }
+
+            match self.cedar.exact_match_search(word) {
+                Some((word_id, _, _)) => {
+                    self.records[word_id as usize].freq = freq;
+                }
+                None => {
+                    self.records
+                        .push(Record::new(String::from(word), freq, String::from(tag)));
+                    let word_id = (self.records.len() - 1) as i32;
+                    self.cedar.update(word, word_id);
+                }
+            };
+        }
+        self.total = self.records.iter().map(|n| n.freq).sum();
+        self
     }
 
     /// Load dictionary
