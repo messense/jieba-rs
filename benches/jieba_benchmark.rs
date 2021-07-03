@@ -29,8 +29,8 @@ fn criterion_benchmark(c: &mut Criterion) {
 
     let mut group = c.benchmark_group("cut");
     group.throughput(Throughput::Bytes(SENTENCE.len() as u64));
-    group.bench_function("no-hmm", |b| b.iter(|| JIEBA.cut(black_box(SENTENCE), false)));
-    group.bench_function("with-hmm", |b| b.iter(|| JIEBA.cut(black_box(SENTENCE), true)));
+    group.bench_function("no_hmm", |b| b.iter(|| JIEBA.cut(black_box(SENTENCE), false)));
+    group.bench_function("with_hmm", |b| b.iter(|| JIEBA.cut(black_box(SENTENCE), true)));
     group.bench_function("cut_all", |b| b.iter(|| JIEBA.cut_all(black_box(SENTENCE))));
     group.bench_function("cut_for_search", |b| {
         b.iter(|| JIEBA.cut_for_search(black_box(SENTENCE), true))
@@ -39,10 +39,10 @@ fn criterion_benchmark(c: &mut Criterion) {
 
     let mut group = c.benchmark_group("tokenize");
     group.throughput(Throughput::Bytes(SENTENCE.len() as u64));
-    group.bench_function("default-mode", |b| {
+    group.bench_function("default_mode", |b| {
         b.iter(|| JIEBA.tokenize(black_box(SENTENCE), TokenizeMode::Default, true))
     });
-    group.bench_function("search-mode", |b| {
+    group.bench_function("search_mode", |b| {
         b.iter(|| JIEBA.tokenize(black_box(SENTENCE), TokenizeMode::Search, true))
     });
     group.finish();
@@ -52,7 +52,7 @@ fn criterion_benchmark(c: &mut Criterion) {
     group.bench_function("tag", |b| b.iter(|| JIEBA.tag(black_box(SENTENCE), true)));
     group.finish();
 
-    let mut group = c.benchmark_group("jieba-extract-keywords");
+    let mut group = c.benchmark_group("keywords");
     group.throughput(Throughput::Bytes(SENTENCE.len() as u64));
     group.bench_function("tfidf", |b| {
         b.iter(|| TFIDF_EXTRACTOR.extract_tags(black_box(SENTENCE), 3, Vec::new()))
