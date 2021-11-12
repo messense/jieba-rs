@@ -60,6 +60,7 @@ cargo bench --all-features
 * [`rjieba-py` Python binding](https://github.com/messense/rjieba-py)
 * [`cang-jie` Chinese tokenizer for tantivy](https://github.com/DCjanus/cang-jie)
 * [`tantivy-jieba` An adapter that bridges between tantivy and jieba-rs](https://github.com/jiegec/tantivy-jieba)
+* [`jieba-wasm` the WebAssembly binding](https://github.com/fengkx/jieba-wasm)
 
 ## License
 
