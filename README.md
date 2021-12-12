@@ -5,6 +5,8 @@
 [![Crates.io](https://img.shields.io/crates/v/jieba-rs.svg)](https://crates.io/crates/jieba-rs)
 [![docs.rs](https://docs.rs/jieba-rs/badge.svg)](https://docs.rs/jieba-rs/)
 
+> 🚀 Help me to become a full-time open-source developer by [sponsoring me on GitHub](https://github.com/sponsors/messense)
+
 The Jieba Chinese Word Segmentation Implemented in Rust
 
 ## Installation
