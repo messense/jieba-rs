@@ -57,7 +57,7 @@ cargo bench --all-features
 
 ## `jieba-rs` bindings
 
-* [`@node-rs/jieba` NodeJS binding](https://github.com/napi-rs/node-rs/tree/master/packages/jieba)
+* [`@node-rs/jieba` NodeJS binding](https://github.com/napi-rs/node-rs/tree/main/packages/jieba)
 * [`jieba-php` PHP binding](https://github.com/binaryoung/jieba-php)
 * [`rjieba-py` Python binding](https://github.com/messense/rjieba-py)
 * [`cang-jie` Chinese tokenizer for tantivy](https://github.com/DCjanus/cang-jie)
