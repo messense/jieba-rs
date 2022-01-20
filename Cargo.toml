@@ -30,7 +30,7 @@ required-features = ["tfidf", "textrank"]
 regex = "1.0"
 lazy_static = "1.0"
 phf = "0.10"
-hashbrown = { version = "0.11", default-features = false, features = ["inline-more"] }
+hashbrown = { version = "0.12", default-features = false, features = ["inline-more"] }
 cedarwood = "0.4"
 ordered-float = { version = "2.0", optional = true }
 fxhash = "0.2.1"
