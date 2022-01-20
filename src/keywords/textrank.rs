@@ -11,14 +11,13 @@ type Weight = f64;
 
 #[derive(Clone)]
 struct Edge {
-    src: usize,
     dst: usize,
     weight: Weight,
 }
 
 impl Edge {
-    fn new(src: usize, dst: usize, weight: Weight) -> Edge {
-        Edge { src, dst, weight }
+    fn new(dst: usize, weight: Weight) -> Edge {
+        Edge { dst, weight }
     }
 }
 
@@ -39,8 +38,8 @@ impl StateDiagram {
     }
 
     fn add_undirected_edge(&mut self, src: usize, dst: usize, weight: Weight) {
-        self.g[src].push(Edge::new(src, dst, weight));
-        self.g[dst].push(Edge::new(dst, src, weight));
+        self.g[src].push(Edge::new(dst, weight));
+        self.g[dst].push(Edge::new(src, weight));
     }
 
     fn rank(&mut self) -> Vec<Weight> {
