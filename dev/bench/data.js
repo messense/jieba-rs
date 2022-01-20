@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1640127830525,
+  "lastUpdate": 1642659458834,
   "repoUrl": "https://github.com/messense/jieba-rs",
   "entries": {
     "jieba_benchmark": [
@@ -887,6 +887,90 @@ window.BENCHMARK_DATA = {
             "name": "keywords/textrank",
             "value": 25984,
             "range": "± 2060",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "messense@icloud.com",
+            "name": "messense",
+            "username": "messense"
+          },
+          "committer": {
+            "email": "messense@icloud.com",
+            "name": "messense",
+            "username": "messense"
+          },
+          "distinct": true,
+          "id": "082d4e43524ce86f2b70c92af5a14a5cd01d9660",
+          "message": "Remove unused `src` field from `Edge` struct",
+          "timestamp": "2022-01-20T14:11:06+08:00",
+          "tree_id": "b013f9390a2b2de46cdbb130011022eb8c4caf0b",
+          "url": "https://github.com/messense/jieba-rs/commit/082d4e43524ce86f2b70c92af5a14a5cd01d9660"
+        },
+        "date": 1642659458310,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "jieba/new",
+            "value": 186923476,
+            "range": "± 5469795",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cut/no_hmm",
+            "value": 8088,
+            "range": "± 213",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cut/with_hmm",
+            "value": 10960,
+            "range": "± 322",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cut/cut_all",
+            "value": 5951,
+            "range": "± 144",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cut/cut_for_search",
+            "value": 12326,
+            "range": "± 565",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "tokenize/default_mode",
+            "value": 11294,
+            "range": "± 307",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "tokenize/search_mode",
+            "value": 11954,
+            "range": "± 222",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "jieba/tag",
+            "value": 11921,
+            "range": "± 328",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "keywords/tfidf",
+            "value": 12805,
+            "range": "± 310",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "keywords/textrank",
+            "value": 27024,
+            "range": "± 534",
             "unit": "ns/iter"
           }
         ]
