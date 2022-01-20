@@ -13,6 +13,8 @@ jobs:
           profile: minimal
           toolchain: stable
           override: true
+      - name: Cache cargo build
+        uses: Swatinem/rust-cache@v1
       - name: Run benchmark
         run: |
           cargo bench --all-features --bench jieba_benchmark -- --output-format bencher | tee output.txt

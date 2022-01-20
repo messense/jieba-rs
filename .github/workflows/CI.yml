@@ -31,6 +31,8 @@ jobs:
           profile: minimal
           toolchain: stable
           override: true
+      - name: Cache cargo build
+        uses: Swatinem/rust-cache@v1
       - name: Check build with --no-default-features
         uses: actions-rs/cargo@v1
         with:
