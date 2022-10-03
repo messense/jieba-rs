@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1664803558610,
+  "lastUpdate": 1664803727798,
   "repoUrl": "https://github.com/messense/jieba-rs",
   "entries": {
     "jieba_benchmark": [
@@ -1471,6 +1471,90 @@ window.BENCHMARK_DATA = {
             "name": "keywords/textrank",
             "value": 23923,
             "range": "± 998",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "messense@icloud.com",
+            "name": "messense",
+            "username": "messense"
+          },
+          "committer": {
+            "email": "messense@icloud.com",
+            "name": "messense",
+            "username": "messense"
+          },
+          "distinct": true,
+          "id": "34c7aecdbb8b17c6b400f4884a1a8ad029d4d71e",
+          "message": "Bump version to 0.6.7",
+          "timestamp": "2022-10-03T21:23:57+08:00",
+          "tree_id": "d3a3d9983ebbd81dacdc24b5d34a95aac3347f7d",
+          "url": "https://github.com/messense/jieba-rs/commit/34c7aecdbb8b17c6b400f4884a1a8ad029d4d71e"
+        },
+        "date": 1664803727014,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "jieba/new",
+            "value": 157175989,
+            "range": "± 930878",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cut/no_hmm",
+            "value": 6807,
+            "range": "± 8",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cut/with_hmm",
+            "value": 9442,
+            "range": "± 12",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cut/cut_all",
+            "value": 4808,
+            "range": "± 3",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cut/cut_for_search",
+            "value": 10426,
+            "range": "± 40",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "tokenize/default_mode",
+            "value": 9731,
+            "range": "± 22",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "tokenize/search_mode",
+            "value": 10106,
+            "range": "± 11",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "jieba/tag",
+            "value": 9859,
+            "range": "± 11",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "keywords/tfidf",
+            "value": 10560,
+            "range": "± 6",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "keywords/textrank",
+            "value": 22182,
+            "range": "± 17",
             "unit": "ns/iter"
           }
         ]
