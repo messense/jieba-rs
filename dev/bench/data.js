@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1642659888755,
+  "lastUpdate": 1664802646767,
   "repoUrl": "https://github.com/messense/jieba-rs",
   "entries": {
     "jieba_benchmark": [
@@ -1139,6 +1139,90 @@ window.BENCHMARK_DATA = {
             "name": "keywords/textrank",
             "value": 28895,
             "range": "± 1333",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "messense@icloud.com",
+            "name": "messense",
+            "username": "messense"
+          },
+          "committer": {
+            "email": "messense@icloud.com",
+            "name": "messense",
+            "username": "messense"
+          },
+          "distinct": true,
+          "id": "2a093182f254f5e96997f133bcda4f11186c0620",
+          "message": "Remove OpenBSD CI\n\nRust version is too old",
+          "timestamp": "2022-01-20T14:20:07+08:00",
+          "tree_id": "ea2725fdf3726a2dbd25c15a0b5db3a2aef72a2a",
+          "url": "https://github.com/messense/jieba-rs/commit/2a093182f254f5e96997f133bcda4f11186c0620"
+        },
+        "date": 1664802644853,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "jieba/new",
+            "value": 196860890,
+            "range": "± 6745140",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cut/no_hmm",
+            "value": 8866,
+            "range": "± 710",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cut/with_hmm",
+            "value": 12137,
+            "range": "± 498",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cut/cut_all",
+            "value": 6418,
+            "range": "± 310",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cut/cut_for_search",
+            "value": 13727,
+            "range": "± 720",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "tokenize/default_mode",
+            "value": 12334,
+            "range": "± 746",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "tokenize/search_mode",
+            "value": 13387,
+            "range": "± 564",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "jieba/tag",
+            "value": 13161,
+            "range": "± 762",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "keywords/tfidf",
+            "value": 13930,
+            "range": "± 1015",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "keywords/textrank",
+            "value": 29044,
+            "range": "± 1375",
             "unit": "ns/iter"
           }
         ]
