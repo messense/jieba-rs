@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1664803099453,
+  "lastUpdate": 1664803558610,
   "repoUrl": "https://github.com/messense/jieba-rs",
   "entries": {
     "jieba_benchmark": [
@@ -1387,6 +1387,90 @@ window.BENCHMARK_DATA = {
             "name": "keywords/textrank",
             "value": 21647,
             "range": "± 755",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "messense@icloud.com",
+            "name": "messense",
+            "username": "messense"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "abfec8e1b6b43f8eab59dc3493275077ac217f02",
+          "message": "Merge pull request #89 from messense/update-deps\n\nchore: update dependencies",
+          "timestamp": "2022-10-03T21:21:25+08:00",
+          "tree_id": "c303b4651a5dcca764d634ac23d986a874ba95e3",
+          "url": "https://github.com/messense/jieba-rs/commit/abfec8e1b6b43f8eab59dc3493275077ac217f02"
+        },
+        "date": 1664803558123,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "jieba/new",
+            "value": 163908632,
+            "range": "± 5034371",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cut/no_hmm",
+            "value": 7350,
+            "range": "± 312",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cut/with_hmm",
+            "value": 10226,
+            "range": "± 410",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cut/cut_all",
+            "value": 5070,
+            "range": "± 224",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cut/cut_for_search",
+            "value": 11413,
+            "range": "± 640",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "tokenize/default_mode",
+            "value": 10373,
+            "range": "± 429",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "tokenize/search_mode",
+            "value": 11199,
+            "range": "± 511",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "jieba/tag",
+            "value": 10980,
+            "range": "± 460",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "keywords/tfidf",
+            "value": 11246,
+            "range": "± 492",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "keywords/textrank",
+            "value": 23923,
+            "range": "± 998",
             "unit": "ns/iter"
           }
         ]
