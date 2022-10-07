@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1664803727798,
+  "lastUpdate": 1665152566343,
   "repoUrl": "https://github.com/messense/jieba-rs",
   "entries": {
     "jieba_benchmark": [
@@ -1555,6 +1555,90 @@ window.BENCHMARK_DATA = {
             "name": "keywords/textrank",
             "value": 22182,
             "range": "± 17",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "messense@icloud.com",
+            "name": "messense",
+            "username": "messense"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "38fe28004b296c1b7608fb56b6bc6239ddfce398",
+          "message": "Merge pull request #90 from kianmeng/fix-typos\n\nFix typos",
+          "timestamp": "2022-10-07T22:17:57+08:00",
+          "tree_id": "2975d5a7259d755b59c7fdff8064c38563711a43",
+          "url": "https://github.com/messense/jieba-rs/commit/38fe28004b296c1b7608fb56b6bc6239ddfce398"
+        },
+        "date": 1665152565622,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "jieba/new",
+            "value": 161213010,
+            "range": "± 1052039",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cut/no_hmm",
+            "value": 6908,
+            "range": "± 9",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cut/with_hmm",
+            "value": 9498,
+            "range": "± 12",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cut/cut_all",
+            "value": 4821,
+            "range": "± 3",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cut/cut_for_search",
+            "value": 10506,
+            "range": "± 6",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "tokenize/default_mode",
+            "value": 9815,
+            "range": "± 11",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "tokenize/search_mode",
+            "value": 10314,
+            "range": "± 16",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "jieba/tag",
+            "value": 9967,
+            "range": "± 22",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "keywords/tfidf",
+            "value": 10511,
+            "range": "± 10",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "keywords/textrank",
+            "value": 22222,
+            "range": "± 22",
             "unit": "ns/iter"
           }
         ]
