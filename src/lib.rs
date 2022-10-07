@@ -101,7 +101,7 @@ use sparse_dag::StaticSparseDAG;
 
 lazy_static! {
     static ref RE_HAN_DEFAULT: Regex = Regex::new(r"([\u{3400}-\u{4DBF}\u{4E00}-\u{9FFF}\u{F900}-\u{FAFF}\u{20000}-\u{2A6DF}\u{2A700}-\u{2B73F}\u{2B740}-\u{2B81F}\u{2B820}-\u{2CEAF}\u{2CEB0}-\u{2EBEF}\u{2F800}-\u{2FA1F}a-zA-Z0-9+#&\._%\-]+)").unwrap();
-    static ref RE_SKIP_DEAFULT: Regex = Regex::new(r"(\r\n|\s)").unwrap();
+    static ref RE_SKIP_DEFAULT: Regex = Regex::new(r"(\r\n|\s)").unwrap();
     static ref RE_HAN_CUT_ALL: Regex = Regex::new(r"([\u{3400}-\u{4DBF}\u{4E00}-\u{9FFF}\u{F900}-\u{FAFF}\u{20000}-\u{2A6DF}\u{2A700}-\u{2B73F}\u{2B740}-\u{2B81F}\u{2B820}-\u{2CEAF}\u{2CEB0}-\u{2EBEF}\u{2F800}-\u{2FA1F}]+)").unwrap();
     static ref RE_SKIP_CUT_ALL: Regex = Regex::new(r"[^a-zA-Z0-9+#\n]").unwrap();
 }
@@ -350,7 +350,7 @@ impl Jieba {
         }
     }
 
-    /// Suggest word frequency to force the characters in a word to be joined or splitted.
+    /// Suggest word frequency to force the characters in a word to be joined or split.
     pub fn suggest_freq(&self, segment: &str) -> usize {
         let logtotal = (self.total as f64).ln();
         let logfreq = self.cut(segment, false).iter().fold(0f64, |freq, word| {
@@ -571,7 +571,7 @@ impl Jieba {
         let heuristic_capacity = sentence.len() / 2;
         let mut words = Vec::with_capacity(heuristic_capacity);
         let re_han: &Regex = if cut_all { &*RE_HAN_CUT_ALL } else { &*RE_HAN_DEFAULT };
-        let re_skip: &Regex = if cut_all { &*RE_SKIP_CUT_ALL } else { &*RE_SKIP_DEAFULT };
+        let re_skip: &Regex = if cut_all { &*RE_SKIP_CUT_ALL } else { &*RE_SKIP_DEFAULT };
         let splitter = SplitMatches::new(&re_han, sentence);
         let mut route = Vec::with_capacity(heuristic_capacity);
         let mut dag = StaticSparseDAG::with_size_hint(heuristic_capacity);
