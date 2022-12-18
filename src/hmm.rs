@@ -1,7 +1,8 @@
-use std::cmp::Ordering;
-
 use lazy_static::lazy_static;
+use once_cell::sync::OnceCell;
 use regex::Regex;
+use std::cmp::Ordering;
+use std::collections::HashMap;
 
 use crate::SplitMatches;
 
@@ -20,6 +21,22 @@ pub enum Status {
     S = 3,
 }
 
+pub struct HmmModel {
+    pub initial_probs: StatusSet,
+    pub trans_probs: [StatusSet; 4],
+    pub emit_probs: [HashMap<String, f64>; 4],
+}
+
+static CUSTOM_HMM_MODEL: OnceCell<HmmModel> = OnceCell::new();
+
+pub fn get_custom_hmm_model() -> Option<&'static HmmModel> {
+    CUSTOM_HMM_MODEL.get()
+}
+
+pub fn init_custom_hmm_model(model: HmmModel) -> Result<(), HmmModel> {
+    CUSTOM_HMM_MODEL.set(model)
+}
+
 static PREV_STATUS: [[Status; 2]; 4] = [
     [Status::E, Status::S], // B
     [Status::B, Status::M], // E
@@ -27,9 +44,84 @@ static PREV_STATUS: [[Status; 2]; 4] = [
     [Status::S, Status::E], // S
 ];
 
-include!(concat!(env!("OUT_DIR"), "/hmm_prob.rs"));
-
 const MIN_FLOAT: f64 = -3.14e100;
+
+#[cfg(feature = "default-hmm-model")]
+mod default_hmm {
+    use super::*;
+
+    include!(concat!(env!("OUT_DIR"), "/hmm_prob.rs"));
+}
+
+#[inline]
+fn get_initial_prob(index: usize) -> f64 {
+    debug_assert!(index < 4);
+    if let Some(model) = get_custom_hmm_model() {
+        model.initial_probs[index]
+    } else {
+        #[cfg(feature = "default-hmm-model")]
+        {
+            default_hmm::INITIAL_PROBS[index]
+        }
+        #[cfg(not(feature = "default-hmm-model"))]
+        {
+            debug_assert!(
+                true,
+                "No default hmm model is provided, please use `set_custom_hmm_model` to set a custom model."
+            );
+            MIN_FLOAT
+        }
+    }
+}
+
+#[inline]
+fn get_emit_prob(index: usize, word: &str) -> f64 {
+    debug_assert!(index < 4);
+    if let Some(model) = get_custom_hmm_model() {
+        model.emit_probs[index].get(word).cloned().unwrap_or(MIN_FLOAT)
+    } else {
+        #[cfg(feature = "default-hmm-model")]
+        {
+            default_hmm::EMIT_PROBS[index].get(word).cloned().unwrap_or(MIN_FLOAT)
+        }
+        #[cfg(not(feature = "default-hmm-model"))]
+        {
+            debug_assert!(
+                true,
+                "No default hmm model is provided, please use `set_custom_hmm_model` to set a custom model."
+            );
+            MIN_FLOAT
+        }
+    }
+}
+
+#[inline]
+fn get_trans_prob(from_index: usize, to_index: usize) -> f64 {
+    debug_assert!(from_index < 4);
+    debug_assert!(to_index < 4);
+    if let Some(model) = get_custom_hmm_model() {
+        model.trans_probs[from_index]
+            .get(to_index)
+            .cloned()
+            .unwrap_or(MIN_FLOAT)
+    } else {
+        #[cfg(feature = "default-hmm-model")]
+        {
+            default_hmm::TRANS_PROBS[from_index]
+                .get(to_index)
+                .cloned()
+                .unwrap_or(MIN_FLOAT)
+        }
+        #[cfg(not(feature = "default-hmm-model"))]
+        {
+            debug_assert!(
+                true,
+                "No default hmm model is provided, please use `set_custom_hmm_model` to set a custom model."
+            );
+            MIN_FLOAT
+        }
+    }
+}
 
 #[allow(non_snake_case)]
 fn viterbi(sentence: &str, V: &mut Vec<f64>, prev: &mut Vec<Option<Status>>, best_path: &mut Vec<Status>) {
@@ -57,7 +149,8 @@ fn viterbi(sentence: &str, V: &mut Vec<f64>, prev: &mut Vec<Option<Status>>, bes
     let x2 = *curr.peek().unwrap();
     for y in &states {
         let first_word = &sentence[x1..x2];
-        let prob = INITIAL_PROBS[*y as usize] + EMIT_PROBS[*y as usize].get(first_word).cloned().unwrap_or(MIN_FLOAT);
+        let index = *y as usize;
+        let prob = get_initial_prob(index) + get_emit_prob(index, first_word);
         V[*y as usize] = prob;
     }
 
@@ -66,14 +159,12 @@ fn viterbi(sentence: &str, V: &mut Vec<f64>, prev: &mut Vec<Option<Status>>, bes
         for y in &states {
             let byte_end = *curr.peek().unwrap_or(&str_len);
             let word = &sentence[byte_start..byte_end];
-            let em_prob = EMIT_PROBS[*y as usize].get(word).cloned().unwrap_or(MIN_FLOAT);
+            let em_prob = get_emit_prob(*y as usize, word);
             let (prob, state) = PREV_STATUS[*y as usize]
                 .iter()
                 .map(|y0| {
                     (
-                        V[(t - 1) * R + (*y0 as usize)]
-                            + TRANS_PROBS[*y0 as usize].get(*y as usize).cloned().unwrap_or(MIN_FLOAT)
-                            + em_prob,
+                        V[(t - 1) * R + (*y0 as usize)] + get_trans_prob(*y0 as usize, *y as usize) + em_prob,
                         *y0,
                     )
                 })
@@ -197,15 +288,52 @@ pub fn cut<'a>(sentence: &'a str, words: &mut Vec<&'a str>) {
     cut_with_allocated_memory(sentence, words, &mut V, &mut prev, &mut path);
 }
 
+#[cfg(all(test, not(feature = "default-hmm-model")))]
+pub fn test_init_custom_hmm_model() {
+    use std::convert::TryInto;
+
+    mod hmm_prob {
+        use super::*;
+        include!(concat!(env!("OUT_DIR"), "/hmm_prob.rs"));
+    }
+
+    if get_custom_hmm_model().is_none() {
+        let initial_probs = hmm_prob::INITIAL_PROBS;
+        let trans_probs = hmm_prob::TRANS_PROBS;
+        let emit_probs: [HashMap<_, _>; 4] = {
+            let mut emit_probs = Vec::new();
+            for prob in hmm_prob::EMIT_PROBS {
+                let mut probs = HashMap::new();
+                for (k, v) in prob {
+                    probs.insert(k.to_string(), *v);
+                }
+                emit_probs.push(probs);
+            }
+            emit_probs.try_into().unwrap()
+        };
+        let _ = init_custom_hmm_model(HmmModel {
+            initial_probs,
+            trans_probs,
+            emit_probs,
+        });
+    }
+}
+
+#[cfg(all(test, feature = "default-hmm-model"))]
+pub fn test_init_custom_hmm_model() {
+    // nothing
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{cut, viterbi, Status};
+    use super::*;
 
     #[test]
     #[allow(non_snake_case)]
     fn test_viterbi() {
         use super::Status::*;
 
+        test_init_custom_hmm_model();
         let sentence = "小明硕士毕业于中国科学院计算所";
 
         let R = 4;
@@ -219,6 +347,7 @@ mod tests {
 
     #[test]
     fn test_hmm_cut() {
+        test_init_custom_hmm_model();
         let sentence = "小明硕士毕业于中国科学院计算所";
         let mut words = Vec::with_capacity(sentence.chars().count() / 2);
         cut(sentence, &mut words);

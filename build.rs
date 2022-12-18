@@ -13,13 +13,13 @@ fn main() {
     let mut lines = reader.lines().map(|x| x.unwrap()).skip_while(|x| x.starts_with('#'));
     let prob_start = lines.next().unwrap();
     writeln!(&mut file, "#[allow(clippy::style)]").unwrap();
-    write!(&mut file, "static INITIAL_PROBS: StatusSet = [").unwrap();
+    write!(&mut file, "pub static INITIAL_PROBS: StatusSet = [").unwrap();
     for prob in prob_start.split(' ') {
         write!(&mut file, "{}, ", prob).unwrap();
     }
     write!(&mut file, "];\n\n").unwrap();
     writeln!(&mut file, "#[allow(clippy::style)]").unwrap();
-    write!(&mut file, "static TRANS_PROBS: [StatusSet; 4] = [").unwrap();
+    write!(&mut file, "pub static TRANS_PROBS: [StatusSet; 4] = [").unwrap();
     for line in lines
         .by_ref()
         .skip_while(|x| x.starts_with('#'))
@@ -38,7 +38,7 @@ fn main() {
             continue;
         }
         writeln!(&mut file, "#[allow(clippy::style)]").unwrap();
-        write!(&mut file, "static EMIT_PROB_{}: phf::Map<&'static str, f64> = ", i).unwrap();
+        write!(&mut file, "pub static EMIT_PROB_{}: phf::Map<&'static str, f64> = ", i).unwrap();
         let mut map = phf_codegen::Map::new();
         for word_prob in line.split(',') {
             let mut parts = word_prob.split(':');
@@ -50,5 +50,5 @@ fn main() {
         i += 1;
     }
     writeln!(&mut file, "#[allow(clippy::style)]").unwrap();
-    writeln!(&mut file, "static EMIT_PROBS: [&'static phf::Map<&'static str, f64>; 4] = [&EMIT_PROB_0, &EMIT_PROB_1, &EMIT_PROB_2, &EMIT_PROB_3];").unwrap();
+    writeln!(&mut file, "pub static EMIT_PROBS: [&'static phf::Map<&'static str, f64>; 4] = [&EMIT_PROB_0, &EMIT_PROB_1, &EMIT_PROB_2, &EMIT_PROB_3];").unwrap();
 }
