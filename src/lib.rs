@@ -75,8 +75,8 @@ use std::cmp::Ordering;
 use std::io::BufRead;
 
 use cedarwood::Cedar;
-use hashbrown::HashMap;
 use regex::{Match, Matches, Regex};
+use std::collections::HashMap;
 
 pub(crate) type FxHashMap<K, V> = HashMap<K, V, fxhash::FxBuildHasher>;
 
@@ -87,6 +87,8 @@ pub use crate::keywords::textrank::TextRank;
 pub use crate::keywords::tfidf::TFIDF;
 #[cfg(any(feature = "tfidf", feature = "textrank"))]
 pub use crate::keywords::{Keyword, KeywordExtract};
+
+pub use crate::hmm::{get_custom_hmm_model, init_custom_hmm_model};
 
 mod errors;
 mod hmm;
@@ -806,6 +808,7 @@ impl Jieba {
 #[cfg(test)]
 mod tests {
     use super::{Jieba, SplitMatches, SplitState, Tag, Token, TokenizeMode, RE_HAN_DEFAULT};
+    use crate::hmm::test_init_custom_hmm_model;
     use std::io::BufReader;
 
     #[test]
@@ -900,6 +903,7 @@ mod tests {
 
     #[test]
     fn test_cut_with_hmm() {
+        test_init_custom_hmm_model();
         let jieba = Jieba::new();
         let words = jieba.cut("我们中出了一个叛徒", false);
         assert_eq!(words, vec!["我们", "中", "出", "了", "一个", "叛徒"]);
@@ -917,6 +921,7 @@ mod tests {
 
     #[test]
     fn test_cut_weicheng() {
+        test_init_custom_hmm_model();
         static WEICHENG_TXT: &str = include_str!("../examples/weicheng/src/weicheng.txt");
         let jieba = Jieba::new();
         for line in WEICHENG_TXT.split('\n') {
@@ -926,6 +931,7 @@ mod tests {
 
     #[test]
     fn test_cut_for_search() {
+        test_init_custom_hmm_model();
         let jieba = Jieba::new();
         let words = jieba.cut_for_search("南京市长江大桥", true);
         assert_eq!(words, vec!["南京", "京市", "南京市", "长江", "大桥", "长江大桥"]);
@@ -962,6 +968,7 @@ mod tests {
 
     #[test]
     fn test_tag() {
+        test_init_custom_hmm_model();
         let jieba = Jieba::new();
         let tags = jieba.tag(
             "我是拖拉机学院手扶拖拉机专业的。不用多久，我就会升职加薪，当上CEO，走上人生巅峰。",
@@ -1078,6 +1085,7 @@ mod tests {
 
     #[test]
     fn test_tokenize() {
+        test_init_custom_hmm_model();
         let jieba = Jieba::new();
         let tokens = jieba.tokenize("南京市长江大桥", TokenizeMode::Default, false);
         assert_eq!(
@@ -1305,6 +1313,7 @@ mod tests {
 
     #[test]
     fn test_userdict_hmm() {
+        test_init_custom_hmm_model();
         let mut jieba = Jieba::new();
         let tokens = jieba.tokenize("我们中出了一个叛徒", TokenizeMode::Default, true);
         assert_eq!(
