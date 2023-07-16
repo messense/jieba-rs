@@ -2,7 +2,7 @@
 name = "jieba-capi"
 version = "0.1.0"
 authors = ["messense <messense@icloud.com>"]
-edition = "2018"
+edition = "2021"
 
 [dependencies]
 jieba-rs = { version = "0.6.0", path = "../", features = ["textrank", "tfidf"] }
