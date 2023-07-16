@@ -18,7 +18,7 @@ struct HeapNode<'a> {
 
 impl<'a> Ord for HeapNode<'a> {
     fn cmp(&self, other: &HeapNode) -> Ordering {
-        other.tfidf.cmp(&self.tfidf).then_with(|| self.word.cmp(&other.word))
+        other.tfidf.cmp(&self.tfidf).then_with(|| self.word.cmp(other.word))
     }
 }
 
@@ -57,7 +57,7 @@ impl<'a> TFIDF<'a> {
         let mut buf = String::new();
         let mut idf_heap = BinaryHeap::new();
         while dict.read_line(&mut buf)? > 0 {
-            let parts: Vec<&str> = buf.trim().split_whitespace().collect();
+            let parts: Vec<&str> = buf.split_whitespace().collect();
             if parts.is_empty() {
                 continue;
             }

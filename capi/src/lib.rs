@@ -131,7 +131,7 @@ pub unsafe extern "C" fn jieba_empty() -> *mut CJieba {
 pub unsafe extern "C" fn jieba_free(j: *mut CJieba) {
     if !j.is_null() {
         let jieba = j as *mut Jieba;
-        Box::from_raw(jieba);
+        drop(Box::from_raw(jieba));
     }
 }
 
@@ -202,7 +202,7 @@ pub unsafe extern "C" fn jieba_tfidf_new(j: *mut CJieba) -> *mut CJiebaTFIDF {
 pub unsafe extern "C" fn jieba_tfidf_free(t: *mut CJiebaTFIDF) {
     if !t.is_null() {
         let tfidf = t as *mut TFIDF;
-        Box::from_raw(tfidf);
+        drop(Box::from_raw(tfidf));
     }
 }
 
@@ -226,7 +226,7 @@ pub unsafe extern "C" fn jieba_tfidf_extract(
         let mut v = Vec::with_capacity(allowed_pos_len);
 
         let slice: &[*mut c_char] = std::slice::from_raw_parts(allowed_pos, allowed_pos_len);
-        for ptr in slice.into_iter() {
+        for ptr in slice.iter() {
             let cstring_allowed_pos = std::ffi::CString::from_raw(*ptr);
             let string_allowed_pos = cstring_allowed_pos.into_string().expect("into_string().err() failed");
             v.push(string_allowed_pos);
@@ -236,10 +236,7 @@ pub unsafe extern "C" fn jieba_tfidf_extract(
     };
 
     let words = (*tfidf).extract_tags(&s, top_k, allowed_pos);
-    let mut c_words: Vec<FfiStr> = words
-        .into_iter()
-        .map(|x| FfiStr::from_string(x.keyword.to_string()))
-        .collect();
+    let mut c_words: Vec<FfiStr> = words.into_iter().map(|x| FfiStr::from_string(x.keyword)).collect();
     let words_len = c_words.len();
     let ptr = c_words.as_mut_ptr();
     mem::forget(c_words);
@@ -269,7 +266,7 @@ pub unsafe extern "C" fn jieba_textrank_extract(
         let mut v = Vec::with_capacity(allowed_pos_len);
 
         let slice: &[*mut c_char] = std::slice::from_raw_parts(allowed_pos, allowed_pos_len);
-        for ptr in slice.into_iter() {
+        for ptr in slice.iter() {
             let cstring_allowed_pos = std::ffi::CString::from_raw(*ptr);
             let string_allowed_pos = cstring_allowed_pos.into_string().expect("into_string().err() failed");
             v.push(string_allowed_pos);
@@ -280,10 +277,7 @@ pub unsafe extern "C" fn jieba_textrank_extract(
 
     let textrank = TextRank::new_with_jieba(&*jieba);
     let words = textrank.extract_tags(&s, top_k, allowed_pos);
-    let mut c_words: Vec<FfiStr> = words
-        .into_iter()
-        .map(|x| FfiStr::from_string(x.keyword.to_string()))
-        .collect();
+    let mut c_words: Vec<FfiStr> = words.into_iter().map(|x| FfiStr::from_string(x.keyword)).collect();
     let words_len = c_words.len();
     let ptr = c_words.as_mut_ptr();
     mem::forget(c_words);
@@ -297,7 +291,7 @@ pub unsafe extern "C" fn jieba_textrank_extract(
 pub unsafe extern "C" fn jieba_words_free(c_words: *mut CJiebaWords) {
     if !c_words.is_null() {
         Vec::from_raw_parts((*c_words).words, (*c_words).len, (*c_words).len);
-        Box::from_raw(c_words);
+        drop(Box::from_raw(c_words));
     }
 }
 
@@ -335,7 +329,7 @@ pub unsafe extern "C" fn jieba_tokenize(
 pub unsafe extern "C" fn jieba_tokens_free(c_tokens: *mut CJiebaTokens) {
     if !c_tokens.is_null() {
         Vec::from_raw_parts((*c_tokens).tokens, (*c_tokens).len, (*c_tokens).len);
-        Box::from_raw(c_tokens);
+        drop(Box::from_raw(c_tokens));
     }
 }
 
@@ -366,7 +360,7 @@ pub unsafe extern "C" fn jieba_tag(j: *mut CJieba, sentence: *const c_char, len:
 pub unsafe extern "C" fn jieba_tags_free(c_tags: *mut CJiebaTags) {
     if !c_tags.is_null() {
         Vec::from_raw_parts((*c_tags).tags, (*c_tags).len, (*c_tags).len);
-        Box::from_raw(c_tags);
+        drop(Box::from_raw(c_tags));
     }
 }
 
@@ -385,8 +379,8 @@ pub unsafe extern "C" fn jieba_suggest_freq(j: *mut CJieba, segment: *const c_ch
     let c_str = CFixedStr::from_ptr(segment, len);
     // FIXME: remove allocation
     let s = String::from_utf8_lossy(c_str.as_bytes_full());
-    let freq = (*jieba).suggest_freq(&s);
-    freq
+
+    (*jieba).suggest_freq(&s)
 }
 
 #[cfg(test)]

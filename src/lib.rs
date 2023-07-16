@@ -304,7 +304,7 @@ impl Jieba {
         while dict.read_line(&mut buf)? > 0 {
             {
                 line_no += 1;
-                let mut iter = buf.trim().split_whitespace();
+                let mut iter = buf.split_whitespace();
                 if let Some(word) = iter.next() {
                     let freq = iter
                         .next()
@@ -570,9 +570,9 @@ impl Jieba {
     fn cut_internal<'a>(&self, sentence: &'a str, cut_all: bool, hmm: bool) -> Vec<&'a str> {
         let heuristic_capacity = sentence.len() / 2;
         let mut words = Vec::with_capacity(heuristic_capacity);
-        let re_han: &Regex = if cut_all { &*RE_HAN_CUT_ALL } else { &*RE_HAN_DEFAULT };
-        let re_skip: &Regex = if cut_all { &*RE_SKIP_CUT_ALL } else { &*RE_SKIP_DEFAULT };
-        let splitter = SplitMatches::new(&re_han, sentence);
+        let re_han: &Regex = if cut_all { &RE_HAN_CUT_ALL } else { &RE_HAN_DEFAULT };
+        let re_skip: &Regex = if cut_all { &RE_SKIP_CUT_ALL } else { &RE_SKIP_DEFAULT };
+        let splitter = SplitMatches::new(re_han, sentence);
         let mut route = Vec::with_capacity(heuristic_capacity);
         let mut dag = StaticSparseDAG::with_size_hint(heuristic_capacity);
 
@@ -600,7 +600,7 @@ impl Jieba {
                     let block = state.into_str();
                     assert!(!block.is_empty());
 
-                    let skip_splitter = SplitMatches::new(&re_skip, block);
+                    let skip_splitter = SplitMatches::new(re_skip, block);
                     for skip_state in skip_splitter {
                         let word = skip_state.into_str();
                         if word.is_empty() {
@@ -817,18 +817,18 @@ mod tests {
     fn test_split_matches() {
         let re_han = &*RE_HAN_DEFAULT;
         let splitter = SplitMatches::new(
-            &re_han,
+            re_han,
             "👪 PS: 我觉得开源有一个好处，就是能够敦促自己不断改进 👪，避免敞帚自珍",
         );
         for state in splitter {
             match state {
                 SplitState::Matched(_) => {
                     let block = state.into_str();
-                    assert_eq!(block.is_empty(), false);
+                    assert!(!block.is_empty());
                 }
                 SplitState::Unmatched(_) => {
                     let block = state.into_str();
-                    assert_eq!(block.is_empty(), false);
+                    assert!(!block.is_empty());
                 }
             }
         }
@@ -837,7 +837,7 @@ mod tests {
     #[test]
     fn test_split_matches_against_unicode_sip() {
         let re_han = &*RE_HAN_DEFAULT;
-        let splitter = SplitMatches::new(&re_han, "讥䶯䶰䶱䶲䶳䶴䶵𦡦");
+        let splitter = SplitMatches::new(re_han, "讥䶯䶰䶱䶲䶳䶴䶵𦡦");
 
         let result: Vec<&str> = splitter.map(|x| x.into_str()).collect();
         assert_eq!(result, vec!["讥䶯䶰䶱䶲䶳䶴䶵𦡦"]);
