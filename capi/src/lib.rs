@@ -1,5 +1,5 @@
 use c_fixed_string::CFixedStr;
-use jieba_rs::{Jieba, KeywordExtract, TFIDFState, TextRank, TFIDF};
+use jieba_rs::{Jieba, KeywordExtract, TextRank, TFIDF};
 use std::boxed::Box;
 use std::os::raw::c_char;
 use std::{mem, ptr};
