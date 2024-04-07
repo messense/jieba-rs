@@ -3,7 +3,7 @@ use std::collections::{BTreeSet, BinaryHeap};
 
 use ordered_float::OrderedFloat;
 
-use super::{Keyword, KeywordExtract, STOP_WORDS};
+use super::{JiebaKeywordExtract, Keyword, KeywordExtract, STOP_WORDS};
 use crate::FxHashMap as HashMap;
 use crate::Jieba;
 
@@ -72,18 +72,16 @@ impl StateDiagram {
 ///
 /// Requires `textrank` feature to be enabled
 #[derive(Debug)]
-pub struct TextRank<'a> {
-    jieba: &'a Jieba,
+pub struct UnboundTextRank {
     span: usize,
     stop_words: BTreeSet<String>,
 }
 
-impl<'a> TextRank<'a> {
-    pub fn new_with_jieba(jieba: &'a Jieba) -> Self {
-        TextRank {
-            jieba,
+impl UnboundTextRank {
+    pub fn new(stop_words: BTreeSet<String>) -> Self {
+        UnboundTextRank {
             span: 5,
-            stop_words: STOP_WORDS.clone(),
+            stop_words: stop_words,
         }
     }
 
@@ -116,9 +114,15 @@ impl<'a> TextRank<'a> {
     }
 }
 
-impl<'a> KeywordExtract for TextRank<'a> {
-    fn extract_tags(&self, sentence: &str, top_k: usize, allowed_pos: Vec<String>) -> Vec<Keyword> {
-        let tags = self.jieba.tag(sentence, true);
+impl Default for UnboundTextRank {
+    fn default() -> Self {
+        UnboundTextRank::new(STOP_WORDS.clone())
+    }
+}
+
+impl JiebaKeywordExtract for UnboundTextRank {
+    fn extract_tags(&self, jieba: &Jieba, sentence: &str, top_k: usize, allowed_pos: Vec<String>) -> Vec<Keyword> {
+        let tags = jieba.tag(sentence, true);
         let mut allowed_pos_set = BTreeSet::new();
 
         for s in allowed_pos {
@@ -199,6 +203,46 @@ impl<'a> KeywordExtract for TextRank<'a> {
 
         res.reverse();
         res
+    }
+}
+
+/// Text rank keywords extraction with a Jieba instance bound to the type.
+///
+/// Requires `textrank` feature to be enabled
+#[derive(Debug)]
+pub struct TextRank<'a> {
+    jieba: &'a Jieba,
+    unbound_text_rank: UnboundTextRank,
+}
+
+impl<'a> TextRank<'a> {
+    pub fn new_with_jieba(jieba: &'a Jieba) -> Self {
+        TextRank {
+            jieba,
+            unbound_text_rank: Default::default(),
+        }
+    }
+
+    /// Add a new stop word
+    pub fn add_stop_word(&mut self, word: String) -> bool {
+        self.unbound_text_rank.add_stop_word(word)
+    }
+
+    /// Remove an existing stop word
+    pub fn remove_stop_word(&mut self, word: &str) -> bool {
+        self.unbound_text_rank.remove_stop_word(word)
+    }
+
+    /// Replace all stop words with new stop words set
+    pub fn set_stop_words(&mut self, stop_words: BTreeSet<String>) {
+        self.unbound_text_rank.set_stop_words(stop_words)
+    }
+}
+
+impl<'a> KeywordExtract for TextRank<'a> {
+    fn extract_tags(&self, sentence: &str, top_k: usize, allowed_pos: Vec<String>) -> Vec<Keyword> {
+        self.unbound_text_rank
+            .extract_tags(self.jieba, sentence, top_k, allowed_pos)
     }
 }
 

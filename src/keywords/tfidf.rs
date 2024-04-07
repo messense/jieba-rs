@@ -4,7 +4,7 @@ use std::io::{self, BufRead, BufReader};
 
 use ordered_float::OrderedFloat;
 
-use super::{Keyword, KeywordExtract, STOP_WORDS};
+use super::{JiebaKeywordExtract, Keyword, KeywordExtract, STOP_WORDS};
 use crate::FxHashMap as HashMap;
 use crate::Jieba;
 
@@ -32,71 +32,26 @@ impl<'a> PartialOrd for HeapNode<'a> {
 ///
 /// Require `tfidf` feature to be enabled
 #[derive(Debug)]
-pub struct TFIDF<'a> {
-    jieba: &'a Jieba,
+pub struct UnboundTFIDF {
     idf_dict: HashMap<String, f64>,
     median_idf: f64,
     stop_words: BTreeSet<String>,
 }
 
-/// Frozen state of TF-IDF keywords extractor without Jieba reference.
-///
-/// This can be used to save the state (stop words, idf_dictionary, etc)
-/// of the TFIDF extractor beyond the lifetime of the `TFIDF<'a>` object.
-/// The state can then be used to construct a new `TFIDF<'a>` object without
-/// reparsing and constructing this data.
-///
-/// This is useful in situations where use of the extractor extends
-/// beyond a stack frame, such as when implementing API bindings into a
-/// programming language with refcounted lifetimes.
-#[derive(Debug)]
-pub struct TFIDFState {
-    idf_dict: HashMap<String, f64>,
-    median_idf: f64,
-    stop_words: BTreeSet<String>,
-}
-
-impl TFIDFState {
-    pub fn new<'a>(tfidf: TFIDF<'a>) -> Self {
-        TFIDFState {
-            idf_dict: tfidf.idf_dict,
-            median_idf: tfidf.median_idf,
-            stop_words: tfidf.stop_words,
-        }
-    }
-}
-
-impl<'a> TFIDF<'a> {
-    pub fn new(jieba: &'a Jieba, tfidf_state: TFIDFState) -> Self {
-        TFIDF {
-            jieba,
-            idf_dict: tfidf_state.idf_dict,
-            median_idf: tfidf_state.median_idf,
-            stop_words: tfidf_state.stop_words,
-        }
-    }
-
-    pub fn new_with_jieba(jieba: &'a Jieba) -> Self {
-        let mut state = TFIDFState {
+impl UnboundTFIDF {
+    pub fn new<R: BufRead>(opt_dict: Option<&mut R>, stop_words: BTreeSet<String>) -> Self {
+        let mut instance = UnboundTFIDF {
             idf_dict: HashMap::default(),
             median_idf: 0.0,
-            stop_words: STOP_WORDS.clone(),
+            stop_words: stop_words,
         };
-
-        let mut default_dict = BufReader::new(DEFAULT_IDF.as_bytes());
-        Self::load_dict_internal(&mut state.idf_dict, &mut state.median_idf, &mut default_dict).unwrap();
-        Self::new(jieba, state)
+        if let Some(dict) = opt_dict {
+            instance.load_dict(dict).unwrap();
+        }
+        instance
     }
 
     pub fn load_dict<R: BufRead>(&mut self, dict: &mut R) -> io::Result<()> {
-        Self::load_dict_internal(&mut self.idf_dict, &mut self.median_idf, dict)
-    }
-
-    fn load_dict_internal<R: BufRead>(
-        idf_dict: &mut HashMap<String, f64>,
-        median_idf: &mut f64,
-        dict: &mut R,
-    ) -> io::Result<()> {
         let mut buf = String::new();
         let mut idf_heap = BinaryHeap::new();
         while dict.read_line(&mut buf)? > 0 {
@@ -107,7 +62,7 @@ impl<'a> TFIDF<'a> {
 
             let word = parts[0];
             if let Some(idf) = parts.get(1).and_then(|x| x.parse::<f64>().ok()) {
-                idf_dict.insert(word.to_string(), idf);
+                self.idf_dict.insert(word.to_string(), idf);
                 idf_heap.push(OrderedFloat(idf));
             }
 
@@ -119,7 +74,7 @@ impl<'a> TFIDF<'a> {
             idf_heap.pop();
         }
 
-        *median_idf = idf_heap.pop().unwrap().into_inner();
+        self.median_idf = idf_heap.pop().unwrap().into_inner();
 
         Ok(())
     }
@@ -153,9 +108,16 @@ impl<'a> TFIDF<'a> {
     }
 }
 
-impl<'a> KeywordExtract for TFIDF<'a> {
-    fn extract_tags(&self, sentence: &str, top_k: usize, allowed_pos: Vec<String>) -> Vec<Keyword> {
-        let tags = self.jieba.tag(sentence, false);
+impl Default for UnboundTFIDF {
+    fn default() -> Self {
+        let mut default_dict = BufReader::new(DEFAULT_IDF.as_bytes());
+        UnboundTFIDF::new(Some(&mut default_dict), STOP_WORDS.clone())
+    }
+}
+
+impl JiebaKeywordExtract for UnboundTFIDF {
+    fn extract_tags(&self, jieba: &Jieba, sentence: &str, top_k: usize, allowed_pos: Vec<String>) -> Vec<Keyword> {
+        let tags = jieba.tag(sentence, false);
         let mut allowed_pos_set = BTreeSet::new();
 
         for s in allowed_pos {
@@ -205,6 +167,50 @@ impl<'a> KeywordExtract for TFIDF<'a> {
     }
 }
 
+/// TF-IDF keywords extraction
+///
+/// Require `tfidf` feature to be enabled
+#[derive(Debug)]
+pub struct TFIDF<'a> {
+    jieba: &'a Jieba,
+    unbound_tfidf: UnboundTFIDF,
+}
+
+impl<'a> TFIDF<'a> {
+    pub fn new_with_jieba(jieba: &'a Jieba) -> Self {
+        TFIDF {
+            jieba,
+            unbound_tfidf: Default::default(),
+        }
+    }
+
+    pub fn load_dict<R: BufRead>(&mut self, dict: &mut R) -> io::Result<()> {
+        self.unbound_tfidf.load_dict(dict)
+    }
+
+    /// Add a new stop word
+    pub fn add_stop_word(&mut self, word: String) -> bool {
+        self.unbound_tfidf.add_stop_word(word)
+    }
+
+    /// Remove an existing stop word
+    pub fn remove_stop_word(&mut self, word: &str) -> bool {
+        self.unbound_tfidf.remove_stop_word(word)
+    }
+
+    /// Replace all stop words with new stop words set
+    pub fn set_stop_words(&mut self, stop_words: BTreeSet<String>) {
+        self.unbound_tfidf.set_stop_words(stop_words)
+    }
+}
+
+impl<'a> KeywordExtract for TFIDF<'a> {
+    fn extract_tags(&self, sentence: &str, top_k: usize, allowed_pos: Vec<String>) -> Vec<Keyword> {
+        self.unbound_tfidf
+            .extract_tags(self.jieba, sentence, top_k, allowed_pos)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -213,13 +219,6 @@ mod tests {
     fn test_init_with_default_idf_dict() {
         let jieba = super::Jieba::new();
         let _ = TFIDF::new_with_jieba(&jieba);
-    }
-
-    #[test]
-    fn test_init_tfidfstate() {
-        let jieba = super::Jieba::new();
-        let tfidf = TFIDF::new_with_jieba(&jieba);
-        let _ = TFIDFState::new(tfidf);
     }
 
     #[test]

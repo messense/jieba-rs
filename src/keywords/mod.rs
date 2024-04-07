@@ -1,6 +1,8 @@
 use lazy_static::lazy_static;
 use std::collections::BTreeSet;
 
+use crate::Jieba;
+
 #[cfg(feature = "textrank")]
 pub mod textrank;
 #[cfg(feature = "tfidf")]
@@ -32,4 +34,9 @@ pub struct Keyword {
 
 pub trait KeywordExtract {
     fn extract_tags(&self, sentence: &str, top_k: usize, allowed_pos: Vec<String>) -> Vec<Keyword>;
+}
+
+/// Version of KeywordExtract trait that requires a Jieba instance on invocation.
+pub trait JiebaKeywordExtract {
+    fn extract_tags(&self, jieba: &Jieba, sentence: &str, top_k: usize, allowed_pos: Vec<String>) -> Vec<Keyword>;
 }
