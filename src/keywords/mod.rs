@@ -9,7 +9,7 @@ pub mod textrank;
 pub mod tfidf;
 
 lazy_static! {
-    pub static ref STOP_WORDS: BTreeSet<String> = {
+    pub static ref DEFAULT_STOP_WORDS: BTreeSet<String> = {
         let mut set = BTreeSet::new();
         let words = [
             "the", "of", "is", "and", "to", "in", "that", "we", "for", "an", "are", "by", "be", "as", "on", "with",
@@ -26,7 +26,7 @@ lazy_static! {
 }
 
 /// Keyword with weight
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Keyword {
     pub keyword: String,
     pub weight: f64,

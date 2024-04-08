@@ -3,7 +3,7 @@ use std::collections::{BTreeSet, BinaryHeap};
 
 use ordered_float::OrderedFloat;
 
-use super::{JiebaKeywordExtract, Keyword, KeywordExtract, STOP_WORDS};
+use super::{JiebaKeywordExtract, Keyword, KeywordExtract, DEFAULT_STOP_WORDS};
 use crate::FxHashMap as HashMap;
 use crate::Jieba;
 
@@ -75,54 +75,96 @@ impl StateDiagram {
 pub struct UnboundTextRank {
     span: usize,
     stop_words: BTreeSet<String>,
+    min_keyword_length: usize,
+    use_hmm: bool,
 }
 
 impl UnboundTextRank {
-    pub fn new(stop_words: BTreeSet<String>) -> Self {
+    /// Creates an UnboundTextRank.
+    ///
+    /// # Examples
+    ///
+    /// New instance with custom stop words. Also uses hmm for unknown words
+    /// during segmentation.
+    /// ```
+    ///    use std::collections::BTreeSet;
+    ///
+    ///    let stop_words : BTreeSet<String> =
+    ///        BTreeSet::from(["a", "the", "of"].map(|s| s.to_string()));
+    ///    jieba_rs::UnboundTextRank::new(
+    ///        5,
+    ///        stop_words,
+    ///        2,
+    ///        false);
+    /// ```
+    pub fn new(span: usize, stop_words: BTreeSet<String>, min_keyword_length: usize, use_hmm: bool) -> Self {
         UnboundTextRank {
-            span: 5,
-            stop_words: stop_words,
+            stop_words,
+            span,
+            min_keyword_length,
+            use_hmm,
         }
     }
 
-    /// Add a new stop word
+    /// Add a new stop word.
     pub fn add_stop_word(&mut self, word: String) -> bool {
         self.stop_words.insert(word)
     }
 
-    /// Remove an existing stop word
+    /// Remove an existing stop word.
     pub fn remove_stop_word(&mut self, word: &str) -> bool {
         self.stop_words.remove(word)
     }
 
-    /// Replace all stop words with new stop words set
+    /// Replace all stop words with new stop words set.
     pub fn set_stop_words(&mut self, stop_words: BTreeSet<String>) {
         self.stop_words = stop_words
     }
 
+    /// Get current set of stop words.
+    pub fn get_stop_words(&self) -> &BTreeSet<String> {
+        &self.stop_words
+    }
+
+    /// True if hmm is used during segmentation in `extract_tags`.
+    pub fn get_use_hmm(&self) -> bool {
+        self.use_hmm
+    }
+
+    /// Sets whether or not to use hmm during segmentation in `extract_tags`.
+    pub fn set_use_hmm(&mut self, use_hmm: bool) {
+        self.use_hmm = use_hmm
+    }
+
+    /// Gets the minimum number of Unicode Scalar Values required per keyword.
+    pub fn get_min_keyword_length(&self) -> usize {
+        self.min_keyword_length
+    }
+
+    /// Sets the minimum number of Unicode Scalar Values required per keyword.
+    ///
+    /// The default is 2. There is likely not much reason to change this.
+    pub fn set_min_keyword_length(&mut self, min_keyword_length: usize) {
+        self.min_keyword_length = min_keyword_length
+    }
+
     #[inline]
     fn filter(&self, s: &str) -> bool {
-        if s.chars().count() < 2 {
-            return false;
-        }
-
-        if self.stop_words.contains(&s.to_lowercase()) {
-            return false;
-        }
-
-        true
+        s.chars().count() >= self.min_keyword_length && !self.stop_words.contains(&s.to_lowercase())
     }
 }
 
 impl Default for UnboundTextRank {
+    /// Creates UnboundTextRank with 5 Unicode Scalar Value spans,
+    /// DEFAULT_STOP_WORDS, and no hmm in segmentation.
     fn default() -> Self {
-        UnboundTextRank::new(STOP_WORDS.clone())
+        UnboundTextRank::new(5, DEFAULT_STOP_WORDS.clone(), 2, false)
     }
 }
 
 impl JiebaKeywordExtract for UnboundTextRank {
     fn extract_tags(&self, jieba: &Jieba, sentence: &str, top_k: usize, allowed_pos: Vec<String>) -> Vec<Keyword> {
-        let tags = jieba.tag(sentence, true);
+        let tags = jieba.tag(sentence, self.use_hmm);
         let mut allowed_pos_set = BTreeSet::new();
 
         for s in allowed_pos {
