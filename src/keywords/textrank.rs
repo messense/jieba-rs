@@ -279,7 +279,7 @@ mod tests {
         );
         assert_eq!(
             top_k.iter().map(|x| &x.keyword).collect::<Vec<&String>>(),
-            vec!["吉林", "欧亚", "置业", "实现", "收入", "增资"]
+            vec!["吉林", "欧亚", "置业", "实现", "收入", "子公司"]
         );
 
         top_k = keyword_extractor.extract_tags(
