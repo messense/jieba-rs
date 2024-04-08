@@ -82,13 +82,11 @@ pub(crate) type FxHashMap<K, V> = HashMap<K, V, fxhash::FxBuildHasher>;
 
 pub use crate::errors::Error;
 #[cfg(feature = "textrank")]
-pub use crate::keywords::textrank::TextRank;
-pub use crate::keywords::textrank::UnboundTextRank;
-pub use crate::keywords::tfidf::UnboundTfidf;
+pub use crate::keywords::textrank::{TextRank, UnboundTextRank};
 #[cfg(feature = "tfidf")]
-pub use crate::keywords::tfidf::TFIDF;
+pub use crate::keywords::tfidf::{UnboundTfidf, TFIDF};
 #[cfg(any(feature = "tfidf", feature = "textrank"))]
-pub use crate::keywords::{JiebaKeywordExtract, Keyword, KeywordExtract, DEFAULT_STOP_WORDS};
+pub use crate::keywords::{JiebaKeywordExtract, Keyword, KeywordExtract, KeywordExtractConfig, DEFAULT_STOP_WORDS};
 
 mod errors;
 mod hmm;
