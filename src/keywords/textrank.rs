@@ -86,10 +86,11 @@ impl UnboundTextRank {
     /// during segmentation.
     /// ```
     ///    use std::collections::BTreeSet;
+    ///    use jieba_rs::{UnboundTextRank, KeywordExtractConfig};
     ///
     ///    let stop_words : BTreeSet<String> =
     ///        BTreeSet::from(["a", "the", "of"].map(|s| s.to_string()));
-    ///    jieba_rs::UnboundTextRank::new(
+    ///    UnboundTextRank::new(
     ///        5,
     ///        KeywordExtractConfig::default());
     /// ```

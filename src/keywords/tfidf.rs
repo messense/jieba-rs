@@ -50,19 +50,23 @@ impl UnboundTfidf {
     ///
     /// New instance with custom idf dictionary.
     /// ```
+    ///    use jieba_rs::{UnboundTfidf, KeywordExtractConfig};
+    ///
     ///    let mut sample_idf = "劳动防护 13.900677652\n\
     ///        生化学 13.900677652\n";
-    ///    jieba_rs::UnboundTfidf::new(
+    ///    UnboundTfidf::new(
     ///        Some(&mut sample_idf.as_bytes()),
-    ///        jieba_rs::KeywordExtractConfig::default());
+    ///        KeywordExtractConfig::default());
     /// ```
     ///
     /// New instance with module default stop words and no initial IDF
     /// dictionary. Dictionary should be loaded later with `load_dict()` calls.
     /// ```
-    ///    jieba_rs::UnboundTfidf::new(
+    ///    use jieba_rs::{UnboundTfidf, KeywordExtractConfig};
+    ///
+    ///    UnboundTfidf::new(
     ///        None::<&mut std::io::Empty>,
-    ///        jieba_rs::KeywordExtractConfig::default());
+    ///        KeywordExtractConfig::default());
     /// ```
     pub fn new(opt_dict: Option<&mut impl BufRead>, config: KeywordExtractConfig) -> Self {
         let mut instance = UnboundTfidf {
