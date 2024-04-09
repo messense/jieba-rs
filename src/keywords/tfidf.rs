@@ -4,7 +4,7 @@ use std::io::{self, BufRead, BufReader};
 
 use ordered_float::OrderedFloat;
 
-use super::{JiebaKeywordExtract, Keyword, KeywordExtract, KeywordExtractConfig};
+use super::{Keyword, KeywordExtract, KeywordExtractConfig};
 use crate::FxHashMap as HashMap;
 use crate::Jieba;
 
@@ -32,29 +32,29 @@ impl<'a> PartialOrd for HeapNode<'a> {
 ///
 /// Require `tfidf` feature to be enabled
 #[derive(Debug)]
-pub struct UnboundTfidf {
+pub struct TfIdf {
     idf_dict: HashMap<String, f64>,
     median_idf: f64,
     config: KeywordExtractConfig,
 }
 
-/// Implementation of JiebaKeywordExtract using a TFIDF dictionary.
+/// Implementation of JiebaKeywordExtract using a TF-IDF dictionary.
 ///
 /// This takes the segments produced by Jieba and attempts to extract keywords.
 /// Segments are filtered for stopwords and short terms. They are then matched
-/// against a loaded dictionary to calculate TFIDF scores.
-impl UnboundTfidf {
-    /// Creates an UnboundTfidf.
+/// against a loaded dictionary to calculate TF-IDF scores.
+impl TfIdf {
+    /// Creates an TfIdf.
     ///
     /// # Examples
     ///
     /// New instance with custom idf dictionary.
     /// ```
-    ///    use jieba_rs::{UnboundTfidf, KeywordExtractConfig};
+    ///    use jieba_rs::{TfIdf, KeywordExtractConfig};
     ///
     ///    let mut sample_idf = "劳动防护 13.900677652\n\
     ///        生化学 13.900677652\n";
-    ///    UnboundTfidf::new(
+    ///    TfIdf::new(
     ///        Some(&mut sample_idf.as_bytes()),
     ///        KeywordExtractConfig::default());
     /// ```
@@ -62,14 +62,14 @@ impl UnboundTfidf {
     /// New instance with module default stop words and no initial IDF
     /// dictionary. Dictionary should be loaded later with `load_dict()` calls.
     /// ```
-    ///    use jieba_rs::{UnboundTfidf, KeywordExtractConfig};
+    ///    use jieba_rs::{TfIdf, KeywordExtractConfig};
     ///
-    ///    UnboundTfidf::new(
+    ///    TfIdf::new(
     ///        None::<&mut std::io::Empty>,
     ///        KeywordExtractConfig::default());
     /// ```
     pub fn new(opt_dict: Option<&mut impl BufRead>, config: KeywordExtractConfig) -> Self {
-        let mut instance = UnboundTfidf {
+        let mut instance = TfIdf {
             idf_dict: HashMap::default(),
             median_idf: 0.0,
             config,
@@ -83,16 +83,16 @@ impl UnboundTfidf {
     /// Merges entires from `dict` into the `idf_dict`.
     ///
     /// ```
-    ///    use jieba_rs::{Jieba, JiebaKeywordExtract, Keyword,
-    ///        KeywordExtractConfig, UnboundTfidf};
+    ///    use jieba_rs::{Jieba, KeywordExtract, Keyword, KeywordExtractConfig,
+    ///        TfIdf};
     ///
     ///    let jieba = Jieba::default();
     ///    let mut init_idf = "生化学 13.900677652\n";
     ///
-    ///    let mut tfidf = UnboundTfidf::new(
+    ///    let mut tfidf = TfIdf::new(
     ///        Some(&mut init_idf.as_bytes()),
     ///        KeywordExtractConfig::default());
-    ///    let top_k = tfidf.extract_tags(&jieba, "生化学不是光化学的,", 3, vec![]);
+    ///    let top_k = tfidf.extract_keywords(&jieba, "生化学不是光化学的,", 3, vec![]);
     ///    assert_eq!(
     ///        top_k,
     ///        vec![
@@ -104,7 +104,7 @@ impl UnboundTfidf {
     ///
     ///    let mut init_idf = "光化学 99.123456789\n";
     ///    tfidf.load_dict(&mut init_idf.as_bytes());
-    ///    let new_top_k = tfidf.extract_tags(&jieba, "生化学不是光化学的,", 3, vec![]);
+    ///    let new_top_k = tfidf.extract_keywords(&jieba, "生化学不是光化学的,", 3, vec![]);
     ///    assert_eq!(
     ///        new_top_k,
     ///        vec![
@@ -151,17 +151,64 @@ impl UnboundTfidf {
     }
 }
 
-impl Default for UnboundTfidf {
-    /// Creates UnboundTfidf with DEFAULT_STOP_WORDS, the default TFIDF dictionary,
+/// TF-IDF keywords extraction.
+///
+/// Require `tfidf` feature to be enabled.
+impl Default for TfIdf {
+    /// Creates TfIdf with DEFAULT_STOP_WORDS, the default TfIdf dictionary,
     /// 2 Unicode Scalar Value minimum for keywords, and no hmm in segmentation.
     fn default() -> Self {
         let mut default_dict = BufReader::new(DEFAULT_IDF.as_bytes());
-        UnboundTfidf::new(Some(&mut default_dict), KeywordExtractConfig::default())
+        TfIdf::new(Some(&mut default_dict), KeywordExtractConfig::default())
     }
 }
 
-impl JiebaKeywordExtract for UnboundTfidf {
-    fn extract_tags(&self, jieba: &Jieba, sentence: &str, top_k: usize, allowed_pos: Vec<String>) -> Vec<Keyword> {
+impl KeywordExtract for TfIdf {
+    /// Uses TF-IDF algorithm to extract the `top_k` keywords from `sentence`.
+    ///
+    /// If `allowed_pos` is not empty, then only terms matching those parts if
+    /// speech are considered.
+    ///
+    /// # Examples
+    /// ```
+    ///    use jieba_rs::{Jieba, KeywordExtract, TfIdf};
+    ///
+    ///    let jieba = Jieba::new();
+    ///    let keyword_extractor = TfIdf::default();
+    ///    let mut top_k = keyword_extractor.extract_keywords(
+    ///        &jieba,
+    ///        "今天纽约的天气真好啊，京华大酒店的张尧经理吃了一只北京烤鸭。后天纽约的天气不好，昨天纽约的天气也不好，北京烤鸭真好吃",
+    ///        3,
+    ///        vec![],
+    ///    );
+    ///    assert_eq!(
+    ///        top_k.iter().map(|x| &x.keyword).collect::<Vec<&String>>(),
+    ///        vec!["北京烤鸭", "纽约", "天气"]
+    ///    );
+    ///
+    ///    top_k = keyword_extractor.extract_keywords(
+    ///        &jieba,
+    ///        "此外，公司拟对全资子公司吉林欧亚置业有限公司增资4.3亿元，增资后，吉林欧亚置业注册资本由7000万元增加到5亿元。吉林欧亚置业主要经营范围为房地产开发及百货零售等业务。目前在建吉林欧亚城市商业综合体项目。2013年，实现营业收入0万元，实现净利润-139.13万元。",
+    ///        5,
+    ///        vec![],
+    ///    );
+    ///    assert_eq!(
+    ///        top_k.iter().map(|x| &x.keyword).collect::<Vec<&String>>(),
+    ///        vec!["欧亚", "吉林", "置业", "万元", "增资"]
+    ///    );
+    ///
+    ///    top_k = keyword_extractor.extract_keywords(
+    ///        &jieba,
+    ///        "此外，公司拟对全资子公司吉林欧亚置业有限公司增资4.3亿元，增资后，吉林欧亚置业注册资本由7000万元增加到5亿元。吉林欧亚置业主要经营范围为房地产开发及百货零售等业务。目前在建吉林欧亚城市商业综合体项目。2013年，实现营业收入0万元，实现净利润-139.13万元。",
+    ///        5,
+    ///        vec![String::from("ns"), String::from("n"), String::from("vn"), String::from("v")],
+    ///    );
+    ///    assert_eq!(
+    ///        top_k.iter().map(|x| &x.keyword).collect::<Vec<&String>>(),
+    ///        vec!["欧亚", "吉林", "置业", "增资", "实现"]
+    ///    );
+    /// ```
+    fn extract_keywords(&self, jieba: &Jieba, sentence: &str, top_k: usize, allowed_pos: Vec<String>) -> Vec<Keyword> {
         let tags = jieba.tag(sentence, self.config.get_use_hmm());
         let mut allowed_pos_set = BTreeSet::new();
 
@@ -209,95 +256,5 @@ impl JiebaKeywordExtract for UnboundTfidf {
 
         res.reverse();
         res
-    }
-}
-
-/// TF-IDF keywords extraction
-///
-/// Require `tfidf` feature to be enabled
-#[derive(Debug)]
-pub struct TFIDF<'a> {
-    jieba: &'a Jieba,
-    unbound_tfidf: UnboundTfidf,
-}
-
-impl<'a> TFIDF<'a> {
-    pub fn new_with_jieba(jieba: &'a Jieba) -> Self {
-        TFIDF {
-            jieba,
-            unbound_tfidf: Default::default(),
-        }
-    }
-
-    pub fn load_dict<R: BufRead>(&mut self, dict: &mut R) -> io::Result<()> {
-        self.unbound_tfidf.load_dict(dict)
-    }
-
-    /// Add a new stop word
-    pub fn add_stop_word(&mut self, word: String) -> bool {
-        self.unbound_tfidf.config.add_stop_word(word)
-    }
-
-    /// Remove an existing stop word
-    pub fn remove_stop_word(&mut self, word: &str) -> bool {
-        self.unbound_tfidf.config.remove_stop_word(word)
-    }
-
-    /// Replace all stop words with new stop words set
-    pub fn set_stop_words(&mut self, stop_words: BTreeSet<String>) {
-        self.unbound_tfidf.config.set_stop_words(stop_words)
-    }
-}
-
-impl<'a> KeywordExtract for TFIDF<'a> {
-    fn extract_tags(&self, sentence: &str, top_k: usize, allowed_pos: Vec<String>) -> Vec<Keyword> {
-        self.unbound_tfidf
-            .extract_tags(self.jieba, sentence, top_k, allowed_pos)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_init_with_default_idf_dict() {
-        let jieba = super::Jieba::new();
-        let _ = TFIDF::new_with_jieba(&jieba);
-    }
-
-    #[test]
-    fn test_extract_tags() {
-        let jieba = super::Jieba::new();
-        let keyword_extractor = TFIDF::new_with_jieba(&jieba);
-        let mut top_k = keyword_extractor.extract_tags(
-            "今天纽约的天气真好啊，京华大酒店的张尧经理吃了一只北京烤鸭。后天纽约的天气不好，昨天纽约的天气也不好，北京烤鸭真好吃",
-            3,
-            vec![],
-        );
-        assert_eq!(
-            top_k.iter().map(|x| &x.keyword).collect::<Vec<&String>>(),
-            vec!["北京烤鸭", "纽约", "天气"]
-        );
-
-        top_k = keyword_extractor.extract_tags(
-            "此外，公司拟对全资子公司吉林欧亚置业有限公司增资4.3亿元，增资后，吉林欧亚置业注册资本由7000万元增加到5亿元。吉林欧亚置业主要经营范围为房地产开发及百货零售等业务。目前在建吉林欧亚城市商业综合体项目。2013年，实现营业收入0万元，实现净利润-139.13万元。",
-            5,
-            vec![],
-        );
-        assert_eq!(
-            top_k.iter().map(|x| &x.keyword).collect::<Vec<&String>>(),
-            vec!["欧亚", "吉林", "置业", "万元", "增资"]
-        );
-
-        top_k = keyword_extractor.extract_tags(
-            "此外，公司拟对全资子公司吉林欧亚置业有限公司增资4.3亿元，增资后，吉林欧亚置业注册资本由7000万元增加到5亿元。吉林欧亚置业主要经营范围为房地产开发及百货零售等业务。目前在建吉林欧亚城市商业综合体项目。2013年，实现营业收入0万元，实现净利润-139.13万元。",
-            5,
-            vec![String::from("ns"), String::from("n"), String::from("vn"), String::from("v")],
-        );
-        assert_eq!(
-            top_k.iter().map(|x| &x.keyword).collect::<Vec<&String>>(),
-            vec!["欧亚", "吉林", "置业", "增资", "实现"]
-        );
     }
 }

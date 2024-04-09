@@ -3,7 +3,7 @@ use std::collections::{BTreeSet, BinaryHeap};
 
 use ordered_float::OrderedFloat;
 
-use super::{JiebaKeywordExtract, Keyword, KeywordExtract, KeywordExtractConfig};
+use super::{Keyword, KeywordExtract, KeywordExtractConfig};
 use crate::FxHashMap as HashMap;
 use crate::Jieba;
 
@@ -68,17 +68,17 @@ impl StateDiagram {
     }
 }
 
-/// Text rank keywords extraction
+/// Text rank keywords extraction.
 ///
-/// Requires `textrank` feature to be enabled
+/// Requires `textrank` feature to be enabled.
 #[derive(Debug)]
-pub struct UnboundTextRank {
+pub struct TextRank {
     span: usize,
     config: KeywordExtractConfig,
 }
 
-impl UnboundTextRank {
-    /// Creates an UnboundTextRank.
+impl TextRank {
+    /// Creates an TextRank.
     ///
     /// # Examples
     ///
@@ -86,28 +86,62 @@ impl UnboundTextRank {
     /// during segmentation.
     /// ```
     ///    use std::collections::BTreeSet;
-    ///    use jieba_rs::{UnboundTextRank, KeywordExtractConfig};
+    ///    use jieba_rs::{TextRank, KeywordExtractConfig};
     ///
     ///    let stop_words : BTreeSet<String> =
     ///        BTreeSet::from(["a", "the", "of"].map(|s| s.to_string()));
-    ///    UnboundTextRank::new(
+    ///    TextRank::new(
     ///        5,
     ///        KeywordExtractConfig::default());
     /// ```
     pub fn new(span: usize, config: KeywordExtractConfig) -> Self {
-        UnboundTextRank { span, config }
+        TextRank { span, config }
     }
 }
 
-impl Default for UnboundTextRank {
-    /// Creates UnboundTextRank with 5 Unicode Scalar Value spans
+impl Default for TextRank {
+    /// Creates TextRank with 5 Unicode Scalar Value spans
     fn default() -> Self {
-        UnboundTextRank::new(5, KeywordExtractConfig::default())
+        TextRank::new(5, KeywordExtractConfig::default())
     }
 }
 
-impl JiebaKeywordExtract for UnboundTextRank {
-    fn extract_tags(&self, jieba: &Jieba, sentence: &str, top_k: usize, allowed_pos: Vec<String>) -> Vec<Keyword> {
+impl KeywordExtract for TextRank {
+    /// Uses TextRank algorithm to extract the `top_k` keywords from `sentence`.
+    ///
+    /// If `allowed_pos` is not empty, then only terms matching those parts if
+    /// speech are considered.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    ///    use jieba_rs::{Jieba, KeywordExtract, TextRank};
+    ///
+    ///    let jieba = Jieba::new();
+    ///    let keyword_extractor = TextRank::default();
+    ///    let mut top_k = keyword_extractor.extract_keywords(
+    ///        &jieba,
+    ///        "此外，公司拟对全资子公司吉林欧亚置业有限公司增资4.3亿元，增资后，吉林欧亚置业注册资本由7000万元增加到5亿元。吉林欧亚置业主要经营范围为房地产开发及百货零售等业务。目前在建吉林欧亚城市商业综合体项目。2013年，实现营业收入0万元，实现净利润-139.13万元。",
+    ///        6,
+    ///        vec![String::from("ns"), String::from("n"), String::from("vn"), String::from("v")],
+    ///    );
+    ///    assert_eq!(
+    ///        top_k.iter().map(|x| &x.keyword).collect::<Vec<&String>>(),
+    ///        vec!["吉林", "欧亚", "置业", "实现", "收入", "子公司"]
+    ///    );
+    ///
+    ///    top_k = keyword_extractor.extract_keywords(
+    ///        &jieba,
+    ///        "It is nice weather in New York City. and今天纽约的天气真好啊，and京华大酒店的张尧经理吃了一只北京烤鸭。and后天纽约的天气不好，and昨天纽约的天气也不好，and北京烤鸭真好吃",
+    ///        3,
+    ///        vec![],
+    ///    );
+    ///    assert_eq!(
+    ///        top_k.iter().map(|x| &x.keyword).collect::<Vec<&String>>(),
+    ///        vec!["纽约", "天气", "不好"]
+    ///    );
+    /// ```
+    fn extract_keywords(&self, jieba: &Jieba, sentence: &str, top_k: usize, allowed_pos: Vec<String>) -> Vec<Keyword> {
         let tags = jieba.tag(sentence, self.config.get_use_hmm());
         let mut allowed_pos_set = BTreeSet::new();
 
@@ -192,46 +226,6 @@ impl JiebaKeywordExtract for UnboundTextRank {
     }
 }
 
-/// Text rank keywords extraction with a Jieba instance bound to the type.
-///
-/// Requires `textrank` feature to be enabled
-#[derive(Debug)]
-pub struct TextRank<'a> {
-    jieba: &'a Jieba,
-    unbound_text_rank: UnboundTextRank,
-}
-
-impl<'a> TextRank<'a> {
-    pub fn new_with_jieba(jieba: &'a Jieba) -> Self {
-        TextRank {
-            jieba,
-            unbound_text_rank: Default::default(),
-        }
-    }
-
-    /// Add a new stop word
-    pub fn add_stop_word(&mut self, word: String) -> bool {
-        self.unbound_text_rank.config.add_stop_word(word)
-    }
-
-    /// Remove an existing stop word
-    pub fn remove_stop_word(&mut self, word: &str) -> bool {
-        self.unbound_text_rank.config.remove_stop_word(word)
-    }
-
-    /// Replace all stop words with new stop words set
-    pub fn set_stop_words(&mut self, stop_words: BTreeSet<String>) {
-        self.unbound_text_rank.config.set_stop_words(stop_words)
-    }
-}
-
-impl<'a> KeywordExtract for TextRank<'a> {
-    fn extract_tags(&self, sentence: &str, top_k: usize, allowed_pos: Vec<String>) -> Vec<Keyword> {
-        self.unbound_text_rank
-            .extract_tags(self.jieba, sentence, top_k, allowed_pos)
-    }
-}
-
 #[derive(Debug, Clone, Eq, PartialEq)]
 struct HeapNode {
     rank: OrderedFloat<f64>,
@@ -256,41 +250,9 @@ impl PartialOrd for HeapNode {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_init_textrank() {
-        let jieba = Jieba::new();
-        let _ = TextRank::new_with_jieba(&jieba);
-    }
-
     #[test]
     fn test_init_state_diagram() {
         let diagram = StateDiagram::new(10);
         assert_eq!(diagram.g.len(), 10);
-    }
-
-    #[test]
-    fn test_extract_tags() {
-        let jieba = Jieba::new();
-        let keyword_extractor = TextRank::new_with_jieba(&jieba);
-        let mut top_k = keyword_extractor.extract_tags(
-            "此外，公司拟对全资子公司吉林欧亚置业有限公司增资4.3亿元，增资后，吉林欧亚置业注册资本由7000万元增加到5亿元。吉林欧亚置业主要经营范围为房地产开发及百货零售等业务。目前在建吉林欧亚城市商业综合体项目。2013年，实现营业收入0万元，实现净利润-139.13万元。",
-            6,
-            vec![String::from("ns"), String::from("n"), String::from("vn"), String::from("v")],
-        );
-        assert_eq!(
-            top_k.iter().map(|x| &x.keyword).collect::<Vec<&String>>(),
-            vec!["吉林", "欧亚", "置业", "实现", "收入", "子公司"]
-        );
-
-        top_k = keyword_extractor.extract_tags(
-            "It is nice weather in New York City. and今天纽约的天气真好啊，and京华大酒店的张尧经理吃了一只北京烤鸭。and后天纽约的天气不好，and昨天纽约的天气也不好，and北京烤鸭真好吃",
-            3,
-            vec![],
-        );
-        assert_eq!(
-            top_k.iter().map(|x| &x.keyword).collect::<Vec<&String>>(),
-            vec!["纽约", "天气", "不好"]
-        );
     }
 }

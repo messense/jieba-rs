@@ -105,11 +105,7 @@ impl Default for KeywordExtractConfig {
     }
 }
 
+/// Extracts keywords from a given sentence with the Jieba instance.
 pub trait KeywordExtract {
-    fn extract_tags(&self, sentence: &str, top_k: usize, allowed_pos: Vec<String>) -> Vec<Keyword>;
-}
-
-/// Version of KeywordExtract trait that requires a Jieba instance on invocation.
-pub trait JiebaKeywordExtract {
-    fn extract_tags(&self, jieba: &Jieba, sentence: &str, top_k: usize, allowed_pos: Vec<String>) -> Vec<Keyword>;
+    fn extract_keywords(&self, jieba: &Jieba, sentence: &str, top_k: usize, allowed_pos: Vec<String>) -> Vec<Keyword>;
 }
