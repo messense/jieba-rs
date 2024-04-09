@@ -1,11 +1,21 @@
 use c_fixed_string::CFixedStr;
-use jieba_rs::{Jieba, KeywordExtract, TextRank, TFIDF};
+use jieba_rs::{Jieba, KeywordExtract, TextRank, TfIdf};
 use std::boxed::Box;
 use std::os::raw::c_char;
 use std::{mem, ptr};
 
-pub struct CJieba;
-pub struct CJiebaTFIDF;
+#[repr(C)]
+pub struct CJieba {
+    jieba: Jieba,
+    _marker: core::marker::PhantomData<(*mut u8, core::marker::PhantomPinned)>,
+}
+
+#[repr(C)]
+pub struct CJiebaTFIDF {
+    cjieba: *mut CJieba,
+    tfidf: TfIdf,
+    _marker: core::marker::PhantomData<(*mut u8, core::marker::PhantomPinned)>,
+}
 
 #[repr(C)]
 pub struct CJiebaWords {
@@ -86,6 +96,8 @@ impl FfiStr {
         rv
     }
 
+    /// # Safety
+    /// Frees the underlying data. After this call, the internal pointer is invalid.
     pub unsafe fn free(&mut self) {
         if self.owned && !self.data.is_null() {
             String::from_raw_parts(self.data as *mut _, self.len, self.len);
@@ -108,6 +120,9 @@ impl Drop for FfiStr {
 ///
 /// If the string is marked as not owned then this function does not
 /// do anything.
+///
+/// # Safety
+/// Used to release strings returned as results of function calls.
 #[no_mangle]
 pub unsafe extern "C" fn jieba_str_free(s: *mut FfiStr) {
     if !s.is_null() {
@@ -115,33 +130,64 @@ pub unsafe extern "C" fn jieba_str_free(s: *mut FfiStr) {
     }
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn jieba_new() -> *mut CJieba {
-    let jieba = Jieba::new();
-    Box::into_raw(Box::new(jieba)) as *mut CJieba
+unsafe fn params_unwrap(cjieba_ref: &*mut CJieba, s: *const c_char, len: usize) -> (&Jieba, &CFixedStr) {
+    let jieba = &(*(*cjieba_ref)).jieba;
+    let c_str = CFixedStr::from_ptr(s, len);
+    (jieba, c_str)
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn jieba_empty() -> *mut CJieba {
-    let jieba = Jieba::empty();
-    Box::into_raw(Box::new(jieba)) as *mut CJieba
+unsafe fn params_unwrap_mut(cjieba_ref: &*mut CJieba, s: *const c_char, len: usize) -> (&mut Jieba, &CFixedStr) {
+    let jieba = &mut (*(*cjieba_ref)).jieba;
+    let c_str = CFixedStr::from_ptr(s, len);
+    (jieba, c_str)
 }
 
+/// # Safety
+/// Returned value must be freed by `jieba_free()`.
 #[no_mangle]
-pub unsafe extern "C" fn jieba_free(j: *mut CJieba) {
-    if !j.is_null() {
-        let jieba = j as *mut Jieba;
-        drop(Box::from_raw(jieba));
+pub extern "C" fn jieba_new() -> *mut CJieba {
+    let cjieba = CJieba {
+        jieba: Jieba::new(),
+        _marker: Default::default(),
+    };
+    Box::into_raw(Box::new(cjieba))
+}
+
+/// Returns a Jieba instance with an empty dictionary.
+///
+/// # Safety
+/// Returned value must be freed by `jieba_free()`.
+#[no_mangle]
+pub extern "C" fn jieba_empty() -> *mut CJieba {
+    let cjieba = CJieba {
+        jieba: Jieba::empty(),
+        _marker: Default::default(),
+    };
+    Box::into_raw(Box::new(cjieba))
+}
+
+/// # Safety
+/// cjieba is result from `jieba_new()` call.
+#[no_mangle]
+pub unsafe extern "C" fn jieba_free(cjieba: *mut CJieba) {
+    if !cjieba.is_null() {
+        drop(Box::from_raw(cjieba));
     }
 }
 
+/// # Safety
+/// cjieba must be valid object from `jieba_new()`. `sentence` must be `len` or larger.
 #[no_mangle]
-pub unsafe extern "C" fn jieba_cut(j: *mut CJieba, sentence: *const c_char, len: usize, hmm: bool) -> *mut CJiebaWords {
-    let jieba = j as *mut Jieba;
-    let c_str = CFixedStr::from_ptr(sentence, len);
+pub unsafe extern "C" fn jieba_cut(
+    cjieba: *mut CJieba,
+    sentence: *const c_char,
+    len: usize,
+    hmm: bool,
+) -> *mut CJiebaWords {
+    let (jieba, c_str) = params_unwrap(&cjieba, sentence, len);
     // FIXME: remove allocation
     let s = String::from_utf8_lossy(c_str.as_bytes_full());
-    let words = (*jieba).cut(&s, hmm);
+    let words = jieba.cut(&s, hmm);
     let mut c_words: Vec<FfiStr> = words.into_iter().map(|x| FfiStr::from_string(x.to_string())).collect();
     let words_len = c_words.len();
     let ptr = c_words.as_mut_ptr();
@@ -152,10 +198,11 @@ pub unsafe extern "C" fn jieba_cut(j: *mut CJieba, sentence: *const c_char, len:
     }))
 }
 
+/// # Safety
+/// cjieba must be valid object from `jieba_new()`. `sentence` must be `len` or larger.
 #[no_mangle]
-pub unsafe extern "C" fn jieba_cut_all(j: *mut CJieba, sentence: *const c_char, len: usize) -> *mut CJiebaWords {
-    let jieba = j as *mut Jieba;
-    let c_str = CFixedStr::from_ptr(sentence, len);
+pub unsafe extern "C" fn jieba_cut_all(cjieba: *mut CJieba, sentence: *const c_char, len: usize) -> *mut CJiebaWords {
+    let (jieba, c_str) = params_unwrap(&cjieba, sentence, len);
     // FIXME: remove allocation
     let s = String::from_utf8_lossy(c_str.as_bytes_full());
     let words = (*jieba).cut_all(&s);
@@ -169,15 +216,16 @@ pub unsafe extern "C" fn jieba_cut_all(j: *mut CJieba, sentence: *const c_char, 
     }))
 }
 
+/// # Safety
+/// cjieba must be valid object from `jieba_new()`. `sentence` must be `len` or larger.
 #[no_mangle]
 pub unsafe extern "C" fn jieba_cut_for_search(
-    j: *mut CJieba,
+    cjieba: *mut CJieba,
     sentence: *const c_char,
     len: usize,
     hmm: bool,
 ) -> *mut CJiebaWords {
-    let jieba = j as *mut Jieba;
-    let c_str = CFixedStr::from_ptr(sentence, len);
+    let (jieba, c_str) = params_unwrap(&cjieba, sentence, len);
     // FIXME: remove allocation
     let s = String::from_utf8_lossy(c_str.as_bytes_full());
     let words = (*jieba).cut_for_search(&s, hmm);
@@ -191,32 +239,45 @@ pub unsafe extern "C" fn jieba_cut_for_search(
     }))
 }
 
+/// # Safety
+/// cjieba must be valid object from `jieba_new()` and must outlive the returned CJiebaTFIDF instance.
+///
+/// Returned value must be freed by `jieba_tfidf_free()`.
 #[no_mangle]
-pub unsafe extern "C" fn jieba_tfidf_new(j: *mut CJieba) -> *mut CJiebaTFIDF {
-    let jieba = j as *mut Jieba;
-    let tfidf = TFIDF::new_with_jieba(&*jieba);
-    Box::into_raw(Box::new(tfidf)) as *mut CJiebaTFIDF
+pub extern "C" fn jieba_tfidf_new(cjieba: *mut CJieba) -> *mut CJiebaTFIDF {
+    let cjieba_tfidf = CJiebaTFIDF {
+        cjieba,
+        tfidf: Default::default(),
+        _marker: Default::default(),
+    };
+    Box::into_raw(Box::new(cjieba_tfidf))
 }
 
+/// # Safety
+/// cjieba_tfidf is result from `jieba_tfidf_new()` call.
 #[no_mangle]
-pub unsafe extern "C" fn jieba_tfidf_free(t: *mut CJiebaTFIDF) {
-    if !t.is_null() {
-        let tfidf = t as *mut TFIDF;
-        drop(Box::from_raw(tfidf));
+pub unsafe extern "C" fn jieba_tfidf_free(cjieba_tfidf: *mut CJiebaTFIDF) {
+    if !cjieba_tfidf.is_null() {
+        drop(Box::from_raw(cjieba_tfidf));
     }
 }
 
+/// # Safety
+/// cjieba_tfidf must be valid object from `jieba_tfidf_new()`. `sentence` must be `len` or larger.
+///
+/// Returned value must be freed by `jieba_words_free()`.
 #[no_mangle]
 pub unsafe extern "C" fn jieba_tfidf_extract(
-    t: *mut CJiebaTFIDF,
+    cjieba_tfidf: *mut CJiebaTFIDF,
     sentence: *const c_char,
     len: usize,
     top_k: usize,
     allowed_pos: *const *mut c_char,
     allowed_pos_len: usize,
 ) -> *mut CJiebaWords {
-    let tfidf = t as *mut TFIDF;
-    let c_str = CFixedStr::from_ptr(sentence, len);
+    let cjieba_tfidf_ref = &(*cjieba_tfidf);
+    let tfidf = &cjieba_tfidf_ref.tfidf;
+    let (jieba, c_str) = params_unwrap(&cjieba_tfidf_ref.cjieba, sentence, len);
     // FIXME: remove allocation
     let s = String::from_utf8_lossy(c_str.as_bytes_full());
 
@@ -235,7 +296,7 @@ pub unsafe extern "C" fn jieba_tfidf_extract(
         v
     };
 
-    let words = (*tfidf).extract_tags(&s, top_k, allowed_pos);
+    let words = tfidf.extract_keywords(jieba, &s, top_k, allowed_pos);
     let mut c_words: Vec<FfiStr> = words.into_iter().map(|x| FfiStr::from_string(x.keyword)).collect();
     let words_len = c_words.len();
     let ptr = c_words.as_mut_ptr();
@@ -246,17 +307,20 @@ pub unsafe extern "C" fn jieba_tfidf_extract(
     }))
 }
 
+/// # Safety
+/// cjieba must be valid object from `jieba_new()`. `sentence` must be `len` or larger.
+///
+/// Returned value must be freed by `jieba_words_free()`.
 #[no_mangle]
 pub unsafe extern "C" fn jieba_textrank_extract(
-    j: *mut CJieba,
+    cjieba: *mut CJieba,
     sentence: *const c_char,
     len: usize,
     top_k: usize,
     allowed_pos: *const *mut c_char,
     allowed_pos_len: usize,
 ) -> *mut CJiebaWords {
-    let jieba = j as *mut Jieba;
-    let c_str = CFixedStr::from_ptr(sentence, len);
+    let (jieba, c_str) = params_unwrap(&cjieba, sentence, len);
     // FIXME: remove allocation
     let s = String::from_utf8_lossy(c_str.as_bytes_full());
 
@@ -275,8 +339,8 @@ pub unsafe extern "C" fn jieba_textrank_extract(
         v
     };
 
-    let textrank = TextRank::new_with_jieba(&*jieba);
-    let words = textrank.extract_tags(&s, top_k, allowed_pos);
+    let textrank = TextRank::default();
+    let words = textrank.extract_keywords(jieba, &s, top_k, allowed_pos);
     let mut c_words: Vec<FfiStr> = words.into_iter().map(|x| FfiStr::from_string(x.keyword)).collect();
     let words_len = c_words.len();
     let ptr = c_words.as_mut_ptr();
@@ -287,6 +351,8 @@ pub unsafe extern "C" fn jieba_textrank_extract(
     }))
 }
 
+/// # Safety
+/// c_tags is result from `jieba_textrank_extract()` or `jieba_tfidf_extract()` call.
 #[no_mangle]
 pub unsafe extern "C" fn jieba_words_free(c_words: *mut CJiebaWords) {
     if !c_words.is_null() {
@@ -295,16 +361,19 @@ pub unsafe extern "C" fn jieba_words_free(c_words: *mut CJiebaWords) {
     }
 }
 
+/// # Safety
+/// cjieba must be valid object from `jieba_new()`. `sentence` must be `len` or larger.
+///
+/// Returned value must be freed by `jieba_tokens_free()`.
 #[no_mangle]
 pub unsafe extern "C" fn jieba_tokenize(
-    j: *mut CJieba,
+    cjieba: *mut CJieba,
     sentence: *const c_char,
     len: usize,
     mode: TokenizeMode,
     hmm: bool,
 ) -> *mut CJiebaTokens {
-    let jieba = j as *mut Jieba;
-    let c_str = CFixedStr::from_ptr(sentence, len);
+    let (jieba, c_str) = params_unwrap(&cjieba, sentence, len);
     // FIXME: remove allocation
     let s = String::from_utf8_lossy(c_str.as_bytes_full());
     let tokens = (*jieba).tokenize(&s, mode.into(), hmm);
@@ -325,6 +394,8 @@ pub unsafe extern "C" fn jieba_tokenize(
     }))
 }
 
+/// # Safety
+/// c_tokens is result from `jieba_tokenize()` call.
 #[no_mangle]
 pub unsafe extern "C" fn jieba_tokens_free(c_tokens: *mut CJiebaTokens) {
     if !c_tokens.is_null() {
@@ -333,10 +404,18 @@ pub unsafe extern "C" fn jieba_tokens_free(c_tokens: *mut CJiebaTokens) {
     }
 }
 
+/// # Safety
+/// cjieba must be valid object from `jieba_new()`. `sentence` must be `len` or larger.
+///
+/// Returned value must be freed by `jieba_tags_free()`.
 #[no_mangle]
-pub unsafe extern "C" fn jieba_tag(j: *mut CJieba, sentence: *const c_char, len: usize, hmm: bool) -> *mut CJiebaTags {
-    let jieba = j as *mut Jieba;
-    let c_str = CFixedStr::from_ptr(sentence, len);
+pub unsafe extern "C" fn jieba_tag(
+    cjieba: *mut CJieba,
+    sentence: *const c_char,
+    len: usize,
+    hmm: bool,
+) -> *mut CJiebaTags {
+    let (jieba, c_str) = params_unwrap(&cjieba, sentence, len);
     // FIXME: remove allocation
     let s = String::from_utf8_lossy(c_str.as_bytes_full());
     let tags = (*jieba).tag(&s, hmm);
@@ -356,6 +435,8 @@ pub unsafe extern "C" fn jieba_tag(j: *mut CJieba, sentence: *const c_char, len:
     }))
 }
 
+/// # Safety
+/// c_tags is result from `jieba_tag()` call.
 #[no_mangle]
 pub unsafe extern "C" fn jieba_tags_free(c_tags: *mut CJiebaTags) {
     if !c_tags.is_null() {
@@ -364,19 +445,21 @@ pub unsafe extern "C" fn jieba_tags_free(c_tags: *mut CJiebaTags) {
     }
 }
 
+/// # Safety
+/// cjieba must be valid object from `jieba_new()`. `word` must be `len` or larger.
 #[no_mangle]
-pub unsafe extern "C" fn jieba_add_word(j: *mut CJieba, word: *const c_char, len: usize) -> usize {
-    let jieba = j as *mut Jieba;
-    let c_str = CFixedStr::from_ptr(word, len);
+pub unsafe extern "C" fn jieba_add_word(cjieba: *mut CJieba, word: *const c_char, len: usize) -> usize {
+    let (jieba, c_str) = params_unwrap_mut(&cjieba, word, len);
     // FIXME: remove allocation
     let s = String::from_utf8_lossy(c_str.as_bytes_full());
-    (*jieba).add_word(&s, None, None)
+    jieba.add_word(&s, None, None)
 }
 
+/// # Safety
+/// cjieba must be valid object from `jieba_new()`. `segment` must be `len` or larger.
 #[no_mangle]
-pub unsafe extern "C" fn jieba_suggest_freq(j: *mut CJieba, segment: *const c_char, len: usize) -> usize {
-    let jieba = j as *mut Jieba;
-    let c_str = CFixedStr::from_ptr(segment, len);
+pub unsafe extern "C" fn jieba_suggest_freq(cjieba: *mut CJieba, segment: *const c_char, len: usize) -> usize {
+    let (jieba, c_str) = params_unwrap(&cjieba, segment, len);
     // FIXME: remove allocation
     let s = String::from_utf8_lossy(c_str.as_bytes_full());
 
@@ -390,28 +473,24 @@ mod test {
 
     #[test]
     fn test_jieba_new_and_free() {
-        unsafe {
-            let jieba = jieba_new();
-            jieba_free(jieba);
-        }
+        let jieba = jieba_new();
+        unsafe { jieba_free(jieba) };
     }
 
     #[test]
     fn test_jieba_empty_and_free() {
-        unsafe {
-            let jieba = jieba_empty();
-            jieba_free(jieba);
-        }
+        let jieba = jieba_empty();
+        unsafe { jieba_free(jieba) };
     }
 
     #[test]
     fn test_jieba_add_word() {
+        let jieba = jieba_empty();
+        let word = "今天";
+        let c_word = CString::new(word).unwrap();
         unsafe {
-            let jieba = jieba_empty();
-            let word = "今天";
-            let c_word = CString::new(word).unwrap();
             jieba_add_word(jieba, c_word.as_ptr(), word.len());
-            jieba_free(jieba);
-        }
+            jieba_free(jieba)
+        };
     }
 }
