@@ -1,7 +1,4 @@
-#[macro_use]
-extern crate criterion;
-
-use criterion::{black_box, Criterion, Throughput};
+use codspeed_criterion_compat::{black_box, criterion_group, criterion_main, Criterion};
 use jieba_rs::{Jieba, KeywordExtract, TextRank, TfIdf, TokenizeMode};
 use lazy_static::lazy_static;
 

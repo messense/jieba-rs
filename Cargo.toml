@@ -14,7 +14,7 @@ edition = '2021'
 all-features = true
 
 [dev-dependencies]
-criterion = "0.5"
+codspeed-criterion-compat = "2.4.1"
 rand = "0.8"
 wasm-bindgen-test = "0.3.0"
 
