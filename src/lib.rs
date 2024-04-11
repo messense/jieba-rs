@@ -74,10 +74,10 @@
 use lazy_static::lazy_static;
 
 use std::cmp::Ordering;
+use std::collections::HashMap;
 use std::io::BufRead;
 
 use cedarwood::Cedar;
-use hashbrown::HashMap;
 use regex::{Match, Matches, Regex};
 
 pub(crate) type FxHashMap<K, V> = HashMap<K, V, fxhash::FxBuildHasher>;
