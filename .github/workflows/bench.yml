@@ -34,5 +34,5 @@ jobs:
       - name: Run the benchmarks
         uses: CodSpeedHQ/action@v2
         with:
-          run: cargo codspeed run --features tfidf,textrank
+          run: cargo codspeed run
           token: ${{ secrets.CODSPEED_TOKEN }}
