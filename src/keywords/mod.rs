@@ -32,7 +32,7 @@ pub struct Keyword {
     pub weight: f64,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct KeywordExtractConfig {
     stop_words: BTreeSet<String>,
     min_keyword_length: usize,
