@@ -94,7 +94,7 @@ impl KeywordExtractConfig {
     }
 
     #[inline]
-    pub fn filter(&self, s: &str) -> bool {
+    pub(crate) fn filter(&self, s: &str) -> bool {
         s.chars().count() >= self.min_keyword_length && !self.stop_words.contains(&s.to_lowercase())
     }
 }
