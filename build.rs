@@ -8,7 +8,7 @@ use std::path::Path;
 fn main() {
     let path = Path::new(&env::var("OUT_DIR").unwrap()).join("hmm_prob.rs");
     let hmm_file = File::open("src/data/hmm.model").expect("cannot open hmm.model");
-    let mut file = BufWriter::new(File::create(&path).unwrap());
+    let mut file = BufWriter::new(File::create(path).unwrap());
     let reader = BufReader::new(hmm_file);
     let mut lines = reader.lines().map(|x| x.unwrap()).skip_while(|x| x.starts_with('#'));
     let prob_start = lines.next().unwrap();

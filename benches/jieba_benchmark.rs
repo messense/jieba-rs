@@ -2,7 +2,7 @@
 extern crate criterion;
 
 use criterion::{black_box, Criterion, Throughput};
-use jieba_rs::{Jieba, KeywordExtract, TextRank, TokenizeMode, TFIDF};
+use jieba_rs::{Jieba, KeywordExtract, TextRank, TfIdf, TokenizeMode};
 use lazy_static::lazy_static;
 
 #[cfg(unix)]
@@ -11,8 +11,8 @@ static ALLOC: jemallocator::Jemalloc = jemallocator::Jemalloc;
 
 lazy_static! {
     static ref JIEBA: Jieba = Jieba::new();
-    static ref TFIDF_EXTRACTOR: TFIDF<'static> = TFIDF::new_with_jieba(&JIEBA);
-    static ref TEXTRANK_EXTRACTOR: TextRank<'static> = TextRank::new_with_jieba(&JIEBA);
+    static ref TFIDF_EXTRACTOR: TfIdf = TfIdf::default();
+    static ref TEXTRANK_EXTRACTOR: TextRank = TextRank::default();
 }
 static SENTENCE: &str = "我是拖拉机学院手扶拖拉机专业的。不用多久，我就会升职加薪，当上CEO，走上人生巅峰。";
 
@@ -55,10 +55,10 @@ fn criterion_benchmark(c: &mut Criterion) {
     let mut group = c.benchmark_group("keywords");
     group.throughput(Throughput::Bytes(SENTENCE.len() as u64));
     group.bench_function("tfidf", |b| {
-        b.iter(|| TFIDF_EXTRACTOR.extract_tags(black_box(SENTENCE), 3, Vec::new()))
+        b.iter(|| TFIDF_EXTRACTOR.extract_keywords(&JIEBA, black_box(SENTENCE), 3, Vec::new()))
     });
     group.bench_function("textrank", |b| {
-        b.iter(|| TEXTRANK_EXTRACTOR.extract_tags(black_box(SENTENCE), 3, Vec::new()))
+        b.iter(|| TEXTRANK_EXTRACTOR.extract_keywords(&JIEBA, black_box(SENTENCE), 3, Vec::new()))
     });
     group.finish();
 }

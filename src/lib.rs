@@ -24,12 +24,13 @@
 //! ```rust
 //! # #[cfg(feature = "tfidf")] {
 //! use jieba_rs::Jieba;
-//! use jieba_rs::{TFIDF, KeywordExtract};
+//! use jieba_rs::{TfIdf, KeywordExtract};
 //!
 //! fn main() {
 //!     let jieba = Jieba::new();
-//!     let keyword_extractor = TFIDF::new_with_jieba(&jieba);
-//!     let top_k = keyword_extractor.extract_tags(
+//!     let keyword_extractor = TfIdf::default();
+//!     let top_k = keyword_extractor.extract_keywords(
+//!         &jieba,
 //!         "今天纽约的天气真好啊，京华大酒店的张尧经理吃了一只北京烤鸭。后天纽约的天气不好，昨天纽约的天气也不好，北京烤鸭真好吃",
 //!         3,
 //!         vec![],
@@ -46,8 +47,9 @@
 //!
 //! fn main() {
 //!     let jieba = Jieba::new();
-//!     let keyword_extractor = TextRank::new_with_jieba(&jieba);
-//!     let top_k = keyword_extractor.extract_tags(
+//!     let keyword_extractor = TextRank::default();
+//!     let top_k = keyword_extractor.extract_keywords(
+//!         &jieba,
 //!         "此外，公司拟对全资子公司吉林欧亚置业有限公司增资4.3亿元，增资后，吉林欧亚置业注册资本由7000万元增加到5亿元。吉林欧亚置业主要经营范围为房地产开发及百货零售等业务。目前在建吉林欧亚城市商业综合体项目。2013年，实现营业收入0万元，实现净利润-139.13万元。",
 //!         6,
 //!         vec![String::from("ns"), String::from("n"), String::from("vn"), String::from("v")],
@@ -84,9 +86,9 @@ pub use crate::errors::Error;
 #[cfg(feature = "textrank")]
 pub use crate::keywords::textrank::TextRank;
 #[cfg(feature = "tfidf")]
-pub use crate::keywords::tfidf::TFIDF;
+pub use crate::keywords::tfidf::TfIdf;
 #[cfg(any(feature = "tfidf", feature = "textrank"))]
-pub use crate::keywords::{Keyword, KeywordExtract};
+pub use crate::keywords::{Keyword, KeywordExtract, KeywordExtractConfig, DEFAULT_STOP_WORDS};
 
 mod errors;
 mod hmm;
