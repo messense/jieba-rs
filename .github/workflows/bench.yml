@@ -29,10 +29,10 @@ jobs:
         run: cargo install cargo-codspeed
 
       - name: Build the benchmark target(s)
-        run: cargo codspeed build --all-features
+        run: cargo codspeed build --features tfidf,textrank
 
       - name: Run the benchmarks
         uses: CodSpeedHQ/action@v2
         with:
-          run: cargo codspeed run --all-features
+          run: cargo codspeed run --features tfidf,textrank
           token: ${{ secrets.CODSPEED_TOKEN }}
