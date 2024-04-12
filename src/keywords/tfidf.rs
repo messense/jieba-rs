@@ -4,7 +4,7 @@ use std::io::{self, BufRead, BufReader};
 
 use ordered_float::OrderedFloat;
 
-use super::{Keyword, KeywordExtract, KeywordExtractConfig};
+use super::{Keyword, KeywordExtract, KeywordExtractConfig, KeywordExtractConfigBuilder};
 use crate::FxHashMap as HashMap;
 use crate::Jieba;
 
@@ -159,7 +159,10 @@ impl Default for TfIdf {
     /// 2 Unicode Scalar Value minimum for keywords, and no hmm in segmentation.
     fn default() -> Self {
         let mut default_dict = BufReader::new(DEFAULT_IDF.as_bytes());
-        TfIdf::new(Some(&mut default_dict), KeywordExtractConfig::default())
+        TfIdf::new(
+            Some(&mut default_dict),
+            KeywordExtractConfigBuilder::default().build().unwrap(),
+        )
     }
 }
 
@@ -209,7 +212,7 @@ impl KeywordExtract for TfIdf {
     ///    );
     /// ```
     fn extract_keywords(&self, jieba: &Jieba, sentence: &str, top_k: usize, allowed_pos: Vec<String>) -> Vec<Keyword> {
-        let tags = jieba.tag(sentence, self.config.get_use_hmm());
+        let tags = jieba.tag(sentence, self.config.use_hmm());
         let mut allowed_pos_set = BTreeSet::new();
 
         for s in allowed_pos {

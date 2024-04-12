@@ -3,7 +3,7 @@ use std::collections::{BTreeSet, BinaryHeap};
 
 use ordered_float::OrderedFloat;
 
-use super::{Keyword, KeywordExtract, KeywordExtractConfig};
+use super::{Keyword, KeywordExtract, KeywordExtractConfig, KeywordExtractConfigBuilder};
 use crate::FxHashMap as HashMap;
 use crate::Jieba;
 
@@ -102,7 +102,7 @@ impl TextRank {
 impl Default for TextRank {
     /// Creates TextRank with 5 Unicode Scalar Value spans
     fn default() -> Self {
-        TextRank::new(5, KeywordExtractConfig::default())
+        TextRank::new(5, KeywordExtractConfigBuilder::default().build().unwrap())
     }
 }
 
@@ -142,7 +142,7 @@ impl KeywordExtract for TextRank {
     ///    );
     /// ```
     fn extract_keywords(&self, jieba: &Jieba, sentence: &str, top_k: usize, allowed_pos: Vec<String>) -> Vec<Keyword> {
-        let tags = jieba.tag(sentence, self.config.get_use_hmm());
+        let tags = jieba.tag(sentence, self.config.use_hmm());
         let mut allowed_pos_set = BTreeSet::new();
 
         for s in allowed_pos {
@@ -156,7 +156,7 @@ impl KeywordExtract for TextRank {
                 continue;
             }
 
-            if word2id.get(t.word).is_none() {
+            if !word2id.contains_key(t.word) {
                 unique_words.push(String::from(t.word));
                 word2id.insert(String::from(t.word), unique_words.len() - 1);
             }
