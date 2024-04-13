@@ -10,18 +10,15 @@ pub mod tfidf;
 
 lazy_static! {
     pub static ref DEFAULT_STOP_WORDS: BTreeSet<String> = {
-        let mut set = BTreeSet::new();
-        let words = [
-            "the", "of", "is", "and", "to", "in", "that", "we", "for", "an", "are", "by", "be", "as", "on", "with",
-            "can", "if", "from", "which", "you", "it", "this", "then", "at", "have", "all", "not", "one", "has", "or",
-            "that",
-        ];
-
-        for &s in words.iter() {
-            set.insert(String::from(s));
-        }
-
-        set
+        BTreeSet::from_iter(
+            [
+                "the", "of", "is", "and", "to", "in", "that", "we", "for", "an", "are", "by", "be", "as", "on", "with",
+                "can", "if", "from", "which", "you", "it", "this", "then", "at", "have", "all", "not", "one", "has",
+                "or", "that",
+            ]
+            .into_iter()
+            .map(|s| s.to_string()),
+        )
     };
 }
 
@@ -109,6 +106,37 @@ impl KeywordExtractConfigBuilder {
     }
 
     /// Add a new stop word.
+    ///
+    /// # Examples
+    /// ```
+    ///    use jieba_rs::KeywordExtractConfig;
+    ///    use std::collections::BTreeSet;
+    ///
+    ///    let populates_default = KeywordExtractConfig::builder()
+    ///        .add_stop_word("FakeWord".to_string())
+    ///        .build().unwrap();
+    ///
+    ///    assert!(populates_default.stop_words().contains("the"));
+    ///    assert!(populates_default.stop_words().contains("FakeWord"));
+    ///
+    ///    let multiple_adds_stack = KeywordExtractConfig::builder()
+    ///        .add_stop_word("FakeWord".to_string())
+    ///        .add_stop_word("MoarFakeWord".to_string())
+    ///        .build().unwrap();
+    ///
+    ///    assert!(multiple_adds_stack.stop_words().contains("the"));
+    ///    assert!(multiple_adds_stack.stop_words().contains("FakeWord"));
+    ///    assert!(multiple_adds_stack.stop_words().contains("MoarFakeWord"));
+    ///
+    ///    let no_default_if_set = KeywordExtractConfig::builder()
+    ///        .set_stop_words(BTreeSet::from(["boo".to_string()]))
+    ///        .add_stop_word("FakeWord".to_string())
+    ///        .build().unwrap();
+    ///
+    ///    assert!(!no_default_if_set.stop_words().contains("the"));
+    ///    assert!(no_default_if_set.stop_words().contains("boo"));
+    ///    assert!(no_default_if_set.stop_words().contains("FakeWord"));
+    /// ```
     pub fn add_stop_word(&mut self, word: String) -> &mut Self {
         if self.stop_words.is_none() {
             self.stop_words = Some(self.default_stop_words().unwrap());
@@ -118,15 +146,59 @@ impl KeywordExtractConfigBuilder {
     }
 
     /// Remove an existing stop word.
-    pub fn remove_stop_word(&mut self, word: &str) -> &mut Self {
+    ///
+    /// # Examples
+    /// ```
+    ///    use jieba_rs::KeywordExtractConfig;
+    ///    use std::collections::BTreeSet;
+    ///
+    ///    let populates_default = KeywordExtractConfig::builder()
+    ///        .remove_stop_word("the")
+    ///        .build().unwrap();
+    ///
+    ///    assert!(!populates_default.stop_words().contains("the"));
+    ///    assert!(populates_default.stop_words().contains("of"));
+    ///
+    ///    let no_default_if_set = KeywordExtractConfig::builder()
+    ///        .set_stop_words(BTreeSet::from(["boo".to_string()]))
+    ///         // Removing non-existant word is okay.
+    ///        .remove_stop_word("the".to_string())
+    ///        .build().unwrap();
+    ///
+    ///    assert!(!no_default_if_set.stop_words().contains("the"));
+    ///    assert!(!no_default_if_set.stop_words().contains("of"));
+    ///    assert!(no_default_if_set.stop_words().contains("boo"));
+    /// ```
+    pub fn remove_stop_word(&mut self, word: impl AsRef<str>) -> &mut Self {
         if self.stop_words.is_none() {
             self.stop_words = Some(self.default_stop_words().unwrap());
         }
-        self.stop_words.as_mut().unwrap().remove(word);
+        self.stop_words.as_mut().unwrap().remove(word.as_ref());
         self
     }
 
     /// Replace all stop words with new stop words set.
+    ///
+    /// # Examples
+    /// ```
+    ///    use jieba_rs::KeywordExtractConfig;
+    ///    use std::collections::BTreeSet;
+    ///
+    ///    let no_default_if_set = KeywordExtractConfig::builder()
+    ///        .set_stop_words(BTreeSet::from(["boo".to_string()]))
+    ///        .build().unwrap();
+    ///
+    ///    assert!(!no_default_if_set.stop_words().contains("the"));
+    ///    assert!(no_default_if_set.stop_words().contains("boo"));
+    ///
+    ///    let overwrites = KeywordExtractConfig::builder()
+    ///        .add_stop_word("FakeWord".to_string())
+    ///        .set_stop_words(BTreeSet::from(["boo".to_string()]))
+    ///        .build().unwrap();
+    ///
+    ///    assert!(!no_default_if_set.stop_words().contains("FakeWord"));
+    ///    assert!(no_default_if_set.stop_words().contains("boo"));
+    /// ```
     pub fn set_stop_words(&mut self, stop_words: BTreeSet<String>) -> &mut Self {
         self.stop_words = Some(stop_words);
         self
