@@ -498,9 +498,7 @@ impl Jieba {
         words: &mut Vec<&'a str>,
         route: &mut Vec<(f64, usize)>,
         dag: &mut StaticSparseDAG,
-        V: &mut Vec<f64>,
-        prev: &mut Vec<Option<hmm::Status>>,
-        path: &mut Vec<hmm::Status>,
+        hmm_context: &mut hmm::HmmContext,
     ) {
         self.dag(sentence, dag);
         self.calc(sentence, dag, route);
@@ -526,7 +524,7 @@ impl Jieba {
                     if word.chars().count() == 1 {
                         words.push(word);
                     } else if self.cedar.exact_match_search(word).is_none() {
-                        hmm::cut_with_allocated_memory(word, words, V, prev, path);
+                        hmm::cut_with_allocated_memory(word, words, hmm_context);
                     } else {
                         let mut word_indices = word.char_indices().map(|x| x.0).peekable();
                         while let Some(byte_start) = word_indices.next() {
@@ -582,11 +580,8 @@ impl Jieba {
         let mut route = Vec::with_capacity(heuristic_capacity);
         let mut dag = StaticSparseDAG::with_size_hint(heuristic_capacity);
 
-        let R = 4;
-        let C = sentence.chars().count();
-        let mut V = if hmm { vec![0.0; R * C] } else { Vec::new() };
-        let mut prev: Vec<Option<hmm::Status>> = if hmm { vec![None; R * C] } else { Vec::new() };
-        let mut path: Vec<hmm::Status> = if hmm { vec![hmm::Status::B; C] } else { Vec::new() };
+        // TODO: Is 4 just the number of variants in Status?
+        let mut hmm_context = hmm::HmmContext::new(4, sentence.chars().count());
 
         for state in splitter {
             match state {
@@ -597,7 +592,7 @@ impl Jieba {
                     if cut_all {
                         self.cut_all_internal(block, &mut words);
                     } else if hmm {
-                        self.cut_dag_hmm(block, &mut words, &mut route, &mut dag, &mut V, &mut prev, &mut path);
+                        self.cut_dag_hmm(block, &mut words, &mut route, &mut dag, &mut hmm_context);
                     } else {
                         self.cut_dag_no_hmm(block, &mut words, &mut route, &mut dag);
                     }
