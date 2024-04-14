@@ -580,8 +580,7 @@ impl Jieba {
         let mut route = Vec::with_capacity(heuristic_capacity);
         let mut dag = StaticSparseDAG::with_size_hint(heuristic_capacity);
 
-        // TODO: Is 4 just the number of variants in Status?
-        let mut hmm_context = hmm::HmmContext::new(4, sentence.chars().count());
+        let mut hmm_context = hmm::HmmContext::new(sentence.chars().count());
 
         for state in splitter {
             match state {
