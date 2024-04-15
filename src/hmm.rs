@@ -28,7 +28,7 @@ pub type StateSet = [f64; NUM_STATES];
 /// WARNING: the data file format for hmm.model comments imply one can
 /// reassign the index values of each state at the top but `build.rs`
 /// currently ignores the mapping. Do not reassign these indicies without
-/// verifying hot it interacts with `build.rs`
+/// verifying how it interacts with `build.rs`
 #[derive(Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Clone, Copy)]
 pub enum State {
     Begin = 0,
