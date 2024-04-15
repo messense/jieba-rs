@@ -25,10 +25,11 @@ pub type StateSet = [f64; NUM_STATES];
 /// can be used as an index into an array representing data pertaining
 /// to that state.
 ///
-/// WARNING: the data file format for hmm.model comments imply one can
+/// WARNING: The data file format for hmm.model comments imply one can
 /// reassign the index values of each state at the top but `build.rs`
 /// currently ignores the mapping. Do not reassign these indicies without
-/// verifying how it interacts with `build.rs`
+/// verifying how it interacts with `build.rs`.  These indicies must also
+/// match the order if ALLOWED_PREV_STATUS.
 #[derive(Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Clone, Copy)]
 pub enum State {
     Begin = 0,
@@ -38,14 +39,18 @@ pub enum State {
 }
 
 // Mapping representing the allow transitiongs into the given state.
-static ALLOWED_PREV_STATUS: [[State; 2]; NUM_STATES] = {
-    let mut valid_transitions_from: [[State; 2]; NUM_STATES] = [[State::Begin, State::Begin]; NUM_STATES];
-    valid_transitions_from[State::Begin as usize] = [State::End, State::Single];
-    valid_transitions_from[State::End as usize] = [State::Begin, State::Middle];
-    valid_transitions_from[State::Middle as usize] = [State::Middle, State::Begin];
-    valid_transitions_from[State::Single as usize] = [State::Single, State::End];
-    valid_transitions_from
-};
+//
+// WARNING: Ordering must match the indicies in State.
+static ALLOWED_PREV_STATUS: [[State; 2]; NUM_STATES] = [
+    // Can preceed State::Begin
+    [State::End, State::Single],
+    // Can preceed State::End
+    [State::Begin, State::Middle],
+    // Can preceed State::Middle
+    [State::Middle, State::Begin],
+    // Can preceed State::Single
+    [State::Single, State::End],
+];
 
 include!(concat!(env!("OUT_DIR"), "/hmm_prob.rs"));
 
