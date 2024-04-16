@@ -67,7 +67,7 @@
 //!
 //! ```toml
 //! [dependencies]
-//! jieba-rs = { version = "0.6", features = ["tfidf", "textrank"] }
+//! jieba-rs = { version = "0.7", features = ["tfidf", "textrank"] }
 //! ```
 //!
 
