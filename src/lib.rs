@@ -90,10 +90,6 @@ pub use crate::keywords::tfidf::TfIdf;
 #[cfg(any(feature = "tfidf", feature = "textrank"))]
 pub use crate::keywords::{Keyword, KeywordExtract, KeywordExtractConfig, DEFAULT_STOP_WORDS};
 
-#[cfg(any(feature = "tfidf", feature = "textrank"))]
-#[macro_use]
-extern crate derive_builder;
-
 mod errors;
 mod hmm;
 #[cfg(any(feature = "tfidf", feature = "textrank"))]
