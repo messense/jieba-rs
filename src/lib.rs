@@ -220,6 +220,60 @@ impl Record {
     }
 }
 
+trait CutStrategy {
+    fn cut<'a>(&mut self, jieba: &Jieba, sentence: &'a str, words: &mut Vec<&'a str>);
+}
+
+struct CutHmmFallbackStrategy {
+    hmm_context: hmm::HmmContext,
+    route: Vec<(f64, usize)>,
+    dag: StaticSparseDAG,
+}
+
+impl CutHmmFallbackStrategy {
+    fn new(context_size: usize, heuristic_capacity: usize) -> Self {
+        CutHmmFallbackStrategy {
+            hmm_context: hmm::HmmContext::new(context_size),
+            route: Vec::with_capacity(heuristic_capacity),
+            dag: StaticSparseDAG::with_size_hint(heuristic_capacity),
+        }
+    }
+}
+
+impl CutStrategy for CutHmmFallbackStrategy {
+    fn cut<'a>(&mut self, jieba: &Jieba, sentence: &'a str, words: &mut Vec<&'a str>) {
+        jieba.cut_dag_hmm(sentence, words, &mut self.route, &mut self.dag, &mut self.hmm_context);
+    }
+}
+
+struct CutNoFallbackStrategy {
+    route: Vec<(f64, usize)>,
+    dag: StaticSparseDAG,
+}
+
+impl CutNoFallbackStrategy {
+    fn new(heuristic_capacity: usize) -> Self {
+        CutNoFallbackStrategy {
+            route: Vec::with_capacity(heuristic_capacity),
+            dag: StaticSparseDAG::with_size_hint(heuristic_capacity),
+        }
+    }
+}
+
+impl CutStrategy for CutNoFallbackStrategy {
+    fn cut<'a>(&mut self, jieba: &Jieba, sentence: &'a str, words: &mut Vec<&'a str>) {
+        jieba.cut_dag_no_hmm(sentence, words, &mut self.route, &mut self.dag);
+    }
+}
+
+struct CutAllStrategy;
+
+impl CutStrategy for CutAllStrategy {
+    fn cut<'a>(&mut self, jieba: &Jieba, sentence: &'a str, words: &mut Vec<&'a str>) {
+        jieba.cut_all_internal(sentence, words);
+    }
+}
+
 /// Jieba segmentation
 #[derive(Debug, Clone)]
 pub struct Jieba {
@@ -570,31 +624,43 @@ impl Jieba {
         route.clear();
     }
 
-    #[allow(non_snake_case)]
     fn cut_internal<'a>(&self, sentence: &'a str, cut_all: bool, hmm: bool) -> Vec<&'a str> {
+        // This is the output buffer.
         let heuristic_capacity = sentence.len() / 2;
         let mut words = Vec::with_capacity(heuristic_capacity);
+
+        if cut_all {
+            let mut strategy = CutAllStrategy {};
+            self.cut_internal2(sentence, cut_all, &mut words, &mut strategy);
+        } else if hmm {
+            // TODO: Why is this sentence.chars().count() and not sentence.len()?
+            let mut strategy = CutHmmFallbackStrategy::new(sentence.chars().count(), heuristic_capacity);
+            self.cut_internal2(sentence, cut_all, &mut words, &mut strategy);
+        } else {
+            let mut strategy = CutNoFallbackStrategy::new(heuristic_capacity);
+            self.cut_internal2(sentence, cut_all, &mut words, &mut strategy);
+        }
+        words
+    }
+
+    fn cut_internal2<'a>(
+        &self,
+        sentence: &'a str,
+        cut_all: bool,
+        words: &mut Vec<&'a str>,
+        cut_strategy: &mut dyn CutStrategy,
+    ) {
+        // This is for this algorithm's selector.
         let re_han: &Regex = if cut_all { &RE_HAN_CUT_ALL } else { &RE_HAN_DEFAULT };
         let re_skip: &Regex = if cut_all { &RE_SKIP_CUT_ALL } else { &RE_SKIP_DEFAULT };
         let splitter = SplitMatches::new(re_han, sentence);
-        let mut route = Vec::with_capacity(heuristic_capacity);
-        let mut dag = StaticSparseDAG::with_size_hint(heuristic_capacity);
-
-        let mut hmm_context = hmm::HmmContext::new(sentence.chars().count());
 
         for state in splitter {
             match state {
                 SplitState::Matched(_) => {
                     let block = state.into_str();
                     assert!(!block.is_empty());
-
-                    if cut_all {
-                        self.cut_all_internal(block, &mut words);
-                    } else if hmm {
-                        self.cut_dag_hmm(block, &mut words, &mut route, &mut dag, &mut hmm_context);
-                    } else {
-                        self.cut_dag_no_hmm(block, &mut words, &mut route, &mut dag);
-                    }
+                    cut_strategy.cut(self, block, words)
                 }
                 SplitState::Unmatched(_) => {
                     let block = state.into_str();
@@ -622,7 +688,6 @@ impl Jieba {
                 }
             }
         }
-        words
     }
 
     /// Cut the input text
