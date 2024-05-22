@@ -2,13 +2,14 @@ use std::cmp::Ordering;
 use std::collections::{BTreeSet, BinaryHeap};
 use std::io::{self, BufRead, BufReader};
 
+use include_flate::flate;
 use ordered_float::OrderedFloat;
 
 use super::{Keyword, KeywordExtract, KeywordExtractConfig, KeywordExtractConfigBuilder};
 use crate::FxHashMap as HashMap;
 use crate::Jieba;
 
-static DEFAULT_IDF: &str = include_str!("../data/idf.txt");
+flate!(static DEFAULT_IDF: str from "src/data/idf.txt");
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 struct HeapNode<'a> {

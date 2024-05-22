@@ -71,6 +71,7 @@
 //! ```
 //!
 
+use include_flate::flate;
 use lazy_static::lazy_static;
 
 use std::cmp::Ordering;
@@ -97,7 +98,7 @@ mod keywords;
 mod sparse_dag;
 
 #[cfg(feature = "default-dict")]
-static DEFAULT_DICT: &str = include_str!("data/dict.txt");
+flate!(static DEFAULT_DICT: str from "src/data/dict.txt");
 
 use sparse_dag::StaticSparseDAG;
 
