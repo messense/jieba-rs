@@ -77,7 +77,7 @@ fn viterbi(sentence: &str, hmm_context: &mut HmmContext) {
     let str_len = sentence.len();
     let states = [State::Begin, State::Middle, State::End, State::Single];
     #[allow(non_snake_case)]
-    let R = states.len();
+        let R = states.len();
     let C = sentence.chars().count();
     assert!(C > 1);
 
@@ -151,7 +151,7 @@ fn viterbi(sentence: &str, hmm_context: &mut HmmContext) {
 }
 
 #[allow(non_snake_case)]
-pub fn cut_internal<'a>(sentence: &'a str, words: &mut Vec<&'a str>, hmm_context: &mut HmmContext) {
+pub(crate) fn cut_internal<'a>(sentence: &'a str, words: &mut Vec<&'a str>, hmm_context: &mut HmmContext) {
     let str_len = sentence.len();
     viterbi(sentence, hmm_context);
     let mut begin = 0;
