@@ -28,8 +28,8 @@ pub type StateSet = [f64; NUM_STATES];
 ///
 /// WARNING: The data file format for hmm.model comments imply one can
 /// reassign the index values of each state at the top but `jieba-macros`
-/// currently ignores the mapping. Do not reassign these indicies without
-/// verifying how it interacts with `jieba-macros`.  These indicies must also
+/// currently ignores the mapping. Do not reassign these indices without
+/// verifying how it interacts with `jieba-macros`.  These indices must also
 /// match the order if ALLOWED_PREV_STATUS.
 #[derive(Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Clone, Copy)]
 pub enum State {

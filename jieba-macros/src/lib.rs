@@ -7,7 +7,8 @@ pub fn generate_hmm_data(_input: TokenStream) -> TokenStream {
     let mut lines = hmm_data.lines().skip_while(|x| x.starts_with('#'));
 
     // Initial probabilities
-    let init_probs = lines.next().unwrap();
+    let init_probs = lines.next().expect("Failed to read initial probabilities from hmm.model");
+    
     output.push_str("#[allow(clippy::style)]\n");
     output.push_str("pub static INITIAL_PROBS: [f64; 4] = [");
     output.push_str(&init_probs.replace(' ', ", "));
