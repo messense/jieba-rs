@@ -144,7 +144,7 @@ impl<'t> SplitState<'t> {
     }
 }
 
-impl<'r, 't> Iterator for SplitMatches<'r, 't> {
+impl<'t> Iterator for SplitMatches<'_, 't> {
     type Item = SplitState<'t>;
 
     fn next(&mut self) -> Option<SplitState<'t>> {
@@ -768,7 +768,7 @@ impl Jieba {
     /// `sentence`: input text
     ///
     /// `hmm`: enable HMM or not
-    pub fn tag<'a>(&'a self, sentence: &'a str, hmm: bool) -> Vec<Tag> {
+    pub fn tag<'a>(&'a self, sentence: &'a str, hmm: bool) -> Vec<Tag<'a>> {
         let words = self.cut(sentence, hmm);
         words
             .into_iter()

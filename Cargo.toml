@@ -27,6 +27,7 @@ harness = false
 required-features = ["tfidf", "textrank"]
 
 [dependencies]
+jieba-macros = { path = "./jieba-macros" }
 cedarwood = "0.4"
 derive_builder = { version = "0.20.0", optional = true }
 fxhash = "0.2.1"
@@ -36,9 +37,6 @@ ordered-float = { version = "4.0", optional = true }
 phf = "0.11"
 regex = "1.0"
 
-[build-dependencies]
-phf_codegen = "0.11"
-
 [features]
 default = ["default-dict"]
 default-dict = []
@@ -46,4 +44,4 @@ tfidf = ["dep:ordered-float", "dep:derive_builder"]
 textrank = ["dep:ordered-float", "dep:derive_builder"]
 
 [workspace]
-members = [".", "capi", "examples/weicheng"]
+members = [".", "capi", "jieba-macros", "examples/weicheng"]

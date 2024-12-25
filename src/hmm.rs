@@ -4,6 +4,7 @@ use lazy_static::lazy_static;
 use regex::Regex;
 
 use crate::SplitMatches;
+use jieba_macros::generate_hmm_data;
 
 lazy_static! {
     static ref RE_HAN: Regex = Regex::new(r"([\u{4E00}-\u{9FD5}]+)").unwrap();
@@ -11,8 +12,6 @@ lazy_static! {
 }
 
 pub const NUM_STATES: usize = 4;
-
-pub type StateSet = [f64; NUM_STATES];
 
 /// Result of hmm is a labeling of each Unicode Scalar Value in the input
 /// string with Begin, Middle, End, or Single. These denote the proposed
@@ -26,9 +25,9 @@ pub type StateSet = [f64; NUM_STATES];
 /// to that state.
 ///
 /// WARNING: The data file format for hmm.model comments imply one can
-/// reassign the index values of each state at the top but `build.rs`
-/// currently ignores the mapping. Do not reassign these indicies without
-/// verifying how it interacts with `build.rs`.  These indicies must also
+/// reassign the index values of each state at the top but `jieba-macros`
+/// currently ignores the mapping. Do not reassign these indices without
+/// verifying how it interacts with `jieba-macros`.  These indices must also
 /// match the order if ALLOWED_PREV_STATUS.
 #[derive(Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Clone, Copy)]
 pub enum State {
@@ -52,7 +51,7 @@ static ALLOWED_PREV_STATUS: [[State; 2]; NUM_STATES] = [
     [State::Single, State::End],
 ];
 
-include!(concat!(env!("OUT_DIR"), "/hmm_prob.rs"));
+generate_hmm_data!();
 
 const MIN_FLOAT: f64 = -3.14e100;
 

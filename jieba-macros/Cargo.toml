@@ -1,0 +1,10 @@
+[package]
+name = "jieba-macros"
+version = "0.7.0"
+edition = "2021"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+phf_codegen = "0.11"
