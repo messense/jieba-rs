@@ -12,7 +12,7 @@ pub struct EdgeIter<'a> {
     cursor: usize,
 }
 
-impl<'a> Iterator for EdgeIter<'a> {
+impl Iterator for EdgeIter<'_> {
     type Item = usize;
 
     fn size_hint(&self) -> (usize, Option<usize>) {

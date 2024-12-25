@@ -13,8 +13,6 @@ lazy_static! {
 
 pub const NUM_STATES: usize = 4;
 
-pub type StateSet = [f64; NUM_STATES];
-
 /// Result of hmm is a labeling of each Unicode Scalar Value in the input
 /// string with Begin, Middle, End, or Single. These denote the proposed
 /// segments. A segment is one of the following two patterns.
