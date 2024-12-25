@@ -2,7 +2,7 @@ use proc_macro::TokenStream;
 
 #[proc_macro]
 pub fn generate_hmm_data(_input: TokenStream) -> TokenStream {
-    let hmm_data = include_str!("../../src/data/hmm.model");
+    let hmm_data = include_str!("hmm.model");
     let mut output = String::new();
     let mut lines = hmm_data.lines().skip_while(|x| x.starts_with('#'));
 
