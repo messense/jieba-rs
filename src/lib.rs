@@ -415,8 +415,7 @@ impl Jieba {
     /// Load dictionary
     pub fn load_dict<R: BufRead>(&mut self, dict: &mut R) -> Result<(), Error> {
         let mut buf = String::new();
-        self.total = 0;
-        self.longest_word_len = 0;
+        self.clear();
 
         let mut line_no = 0;
         while dict.read_line(&mut buf)? > 0 {
