@@ -249,11 +249,8 @@ impl Jieba {
     /// Requires `default-dict` feature to be enabled.
     #[cfg(feature = "default-dict")]
     pub fn new() -> Self {
-        use std::io::BufReader;
-
         let mut instance = Self::empty();
-        let mut default_dict = BufReader::new(DEFAULT_DICT.as_bytes());
-        instance.load_dict(&mut default_dict).unwrap();
+        instance.load_default_dict();
         instance
     }
 
@@ -263,10 +260,127 @@ impl Jieba {
         instance.load_dict(dict)?;
         Ok(instance)
     }
+
+    /// Clears all data
+    ///
+    /// This method performs the following actions:
+    /// 1. Clears the `records` list, removing all entries.
+    /// 2. Resets `cedar` to a new instance of `Cedar`.
+    /// 3. Sets `total` to 0, resetting the count.
+    /// 4. Sets `longest_word_len` to 0, resetting the longest word length tracker.
+    ///
+    /// # Arguments
+    ///
+    /// * `&mut self` - Mutable reference to the current instance.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use jieba_rs::Jieba;
+    ///
+    /// let mut instance = Jieba::new();
+    /// assert!(instance.has_word("我们"), "The word '我们' should be in the dictionary after loading the default dictionary");
+    /// instance.clear(); // clear all dict data
+    /// assert!(!instance.has_word("我们"), "The word '我们' should not be in the dictionary after clearing the dictionary");
+    /// ```
+    pub fn clear(&mut self) {
+        self.records.clear();
+        self.cedar = Cedar::new();
+        self.total = 0;
+        self.longest_word_len = 0;
+    }
+
+    /// Loads the default dictionary into the instance.
+    ///
+    /// This method reads the default dictionary from a predefined byte slice (`DEFAULT_DICT`)
+    /// and loads it into the current instance using the `load_dict` method.
+    ///
+    /// # Arguments
+    ///
+    /// * `&mut self` - Mutable reference to the current instance.
+    ///
+    /// Requires `default-dict` feature to be enabled.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use jieba_rs::Jieba;
+    ///
+    /// let mut instance = Jieba::empty();
+    /// instance.load_default_dict(); // Loads the default dictionary into the instance
+    /// assert!(instance.has_word("我们"), "The word '我们' should be in the dictionary after loading the default dictionary");
+    /// ```
+    #[cfg(feature = "default-dict")]
+    pub fn load_default_dict(&mut self) {
+        use std::io::BufReader;
+
+        let mut default_dict = BufReader::new(DEFAULT_DICT.as_bytes());
+        self.load_dict(&mut default_dict).unwrap();
+    }
+
+    /// Checks if a word exists in the dictionary.
+    ///
+    /// # Arguments
+    ///
+    /// * `word` - The word to check.
+    ///
+    /// # Returns
+    ///
+    /// * `bool` - Whether the word exists in the dictionary.
+    pub fn has_word(&self, word: &str) -> bool {
+        self.cedar.exact_match_search(word).is_some()
+    }
+
+    /// Remove a word from the dictionary
+    ///
+    /// # Arguments
+    ///
+    /// * `word` - The word to remove.
+    ///
+    /// # Returns
+    ///
+    /// * `bool` - Whether the word was successfully removed.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use jieba_rs::Jieba;
+    ///
+    /// let mut instance = Jieba::empty();
+    /// assert!(!instance.has_word("我们"), "The word '我们' should not be in the dictionary after clearing the dictionary");
+    /// instance.add_word("我们", Some(100), Some("r")); // add word '我们' with freq 100 and tag 'n'
+    /// instance.add_word("我", Some(100), Some("r")); // add word '我' with freq 100 and tag 'n'
+    /// assert!(instance.has_word("我们"), "The word '我们' should be in the dictionary after adding the word");
+    /// assert!(instance.has_word("我"), "The word '我' should be in the dictionary after adding the word");
+    /// instance.remove_word("我们");
+    /// assert!(!instance.has_word("我们"), "The word '我们' should not be in the dictionary after removing the word");
+    /// assert!(instance.has_word("我"), "The word '我' should be in the dictionary after adding the word");
+    /// ```
+    pub fn remove_word(&mut self, word: &str) -> bool {
+        if let Some((word_id, _, _)) = self.cedar.exact_match_search(word) {
+            let word_id = word_id as usize;
+            let freq = self.records[word_id].freq;
+
+            self.cedar.erase(word);
+            self.records.remove(word_id);
+            self.total -= freq;
+
+            // let word_len = word.chars().count();
+            // if word_len == self.longest_word_len {
+            //     self.update_longest_word_len();
+            // }
+
+            true
+        } else {
+            false
+        }
+    }
+
     /// Add word to dict, return `freq`
     ///
     /// `freq`: if `None`, will be given by [suggest_freq](#method.suggest_freq)
     ///
+
     /// `tag`: if `None`, will be given `""`
     pub fn add_word(&mut self, word: &str, freq: Option<usize>, tag: Option<&str>) -> usize {
         let freq = freq.unwrap_or_else(|| self.suggest_freq(word));
