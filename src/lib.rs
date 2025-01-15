@@ -224,6 +224,7 @@ pub struct Jieba {
     cedar: Cedar,
     total: usize,
     longest_word_len: usize,
+    last_key_id: usize,
 }
 
 #[cfg(feature = "default-dict")]
@@ -241,6 +242,7 @@ impl Jieba {
             cedar: Cedar::new(),
             total: 0,
             longest_word_len: 0,
+            last_key_id: 0,
         }
     }
 
@@ -288,6 +290,7 @@ impl Jieba {
         self.cedar = Cedar::new();
         self.total = 0;
         self.longest_word_len = 0;
+        self.last_key_id = 0;
     }
 
     /// Loads the default dictionary into the instance.
@@ -396,8 +399,9 @@ impl Jieba {
                 self.total -= old_freq;
             }
             None => {
+                self.last_key_id = self.records.len();
                 self.records.push(Record::new(freq, String::from(tag)));
-                let word_id = (self.records.len() - 1) as i32;
+                let word_id = self.last_key_id as i32;
 
                 self.cedar.update(word, word_id);
                 self.total += freq;
@@ -412,10 +416,36 @@ impl Jieba {
         freq
     }
 
-    /// Load dictionary
+    /// Loads a dictionary by adding entries to the existing dictionary rather than resetting it.
+    ///
+    /// This function reads from a `BufRead` source, parsing each line as a dictionary entry. Each entry
+    /// is expected to contain a word, its frequency, and optionally a tag. The function updates the
+    /// internal data structures (`cedar`, `records`) with these entries, ensuring that the longest word
+    /// length and total frequency are correctly maintained.
+    ///
+    /// # Type Parameters
+    ///
+    /// * `R`: A type that implements the `BufRead` trait, used for reading lines from the dictionary.
+    ///
+    /// # Arguments
+    ///
+    /// * `dict` - A mutable reference to a `BufRead` source containing the dictionary entries.
+    ///
+    /// # Returns
+    ///
+    /// * `Result<(), Error>` - Returns `Ok(())` if the dictionary is successfully loaded; otherwise,
+    ///   returns an error describing what went wrong.
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if:
+    /// * There is an issue reading from the provided `BufRead` source.
+    /// * A line in the dictionary file contains invalid frequency data (not a valid integer).
+    ///
     pub fn load_dict<R: BufRead>(&mut self, dict: &mut R) -> Result<(), Error> {
         let mut buf = String::new();
-        self.clear();
+        self.total = 0;
+        self.longest_word_len = 0;
 
         let mut line_no = 0;
         while dict.read_line(&mut buf)? > 0 {
@@ -456,6 +486,7 @@ impl Jieba {
             buf.clear();
         }
         self.total = self.records.iter().map(|n| n.freq).sum();
+        self.last_key_id = self.records.len();
 
         Ok(())
     }
