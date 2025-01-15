@@ -214,7 +214,11 @@ struct Record {
 impl Record {
     #[inline(always)]
     fn new(freq: usize, tag: String) -> Self {
-        Self { freq, tag, deleted: false }
+        Self {
+            freq,
+            tag,
+            deleted: false,
+        }
     }
 
     fn mark_deleted(&mut self) {
@@ -1576,7 +1580,6 @@ mod tests {
 
     #[test]
     fn test_remove_word() {
-
         let mut jieba = Jieba::new();
         jieba.add_word("开-始测-试", Some(300), None);
         assert_eq!(jieba.suggest_freq("开-始测-试"), 300);
