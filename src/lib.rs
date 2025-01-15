@@ -208,12 +208,18 @@ pub struct Tag<'a> {
 struct Record {
     freq: usize,
     tag: String,
+    deleted: bool,
 }
 
 impl Record {
     #[inline(always)]
     fn new(freq: usize, tag: String) -> Self {
-        Self { freq, tag }
+        Self { freq, tag, deleted: false }
+    }
+
+    fn mark_deleted(&mut self) {
+        self.deleted = true;
+        self.tag.clear();
     }
 }
 
@@ -224,7 +230,6 @@ pub struct Jieba {
     cedar: Cedar,
     total: usize,
     longest_word_len: usize,
-    last_key_id: usize,
 }
 
 #[cfg(feature = "default-dict")]
@@ -242,7 +247,6 @@ impl Jieba {
             cedar: Cedar::new(),
             total: 0,
             longest_word_len: 0,
-            last_key_id: 0,
         }
     }
 
@@ -290,7 +294,6 @@ impl Jieba {
         self.cedar = Cedar::new();
         self.total = 0;
         self.longest_word_len = 0;
-        self.last_key_id = 0;
     }
 
     /// Loads the default dictionary into the instance.
@@ -367,7 +370,7 @@ impl Jieba {
             let freq = self.records[word_id].freq;
 
             self.cedar.erase(word);
-            self.records.remove(word_id);
+            self.records[word_id].mark_deleted();
             self.total -= freq;
 
             // let word_len = word.chars().count();
@@ -399,9 +402,8 @@ impl Jieba {
                 self.total -= old_freq;
             }
             None => {
+                let word_id = self.records.len() as i32;
                 self.records.push(Record::new(freq, String::from(tag)));
-                let word_id = self.last_key_id as i32;
-                self.last_key_id += 1;
 
                 self.cedar.update(word, word_id);
                 self.total += freq;
@@ -476,9 +478,8 @@ impl Jieba {
                             self.records[word_id as usize].freq = freq;
                         }
                         None => {
+                            let word_id = self.records.len() as i32;
                             self.records.push(Record::new(freq, String::from(tag)));
-                            let word_id = (self.last_key_id) as i32;
-                            self.last_key_id += 1;
                             self.cedar.update(word, word_id);
                         }
                     };
@@ -1571,5 +1572,16 @@ mod tests {
         jieba.add_word("田-女士", Some(42), Some("n"));
         let words = jieba.cut("市民田-女士急匆匆", false);
         assert_eq!(words, vec!["市", "民", "田-女士", "急", "匆", "匆"]);
+    }
+
+    #[test]
+    fn test_remove_word() {
+
+        let mut jieba = Jieba::new();
+        jieba.add_word("开-始测-试", Some(300), None);
+        assert_eq!(jieba.suggest_freq("开-始测-试"), 300);
+        jieba.remove_word("开-始测-试");
+        jieba.add_word("开-始测-试", Some(301), None);
+        assert_eq!(jieba.suggest_freq("开-始测-试"), 301);
     }
 }
