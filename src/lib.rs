@@ -399,9 +399,9 @@ impl Jieba {
                 self.total -= old_freq;
             }
             None => {
-                self.last_key_id = self.records.len();
                 self.records.push(Record::new(freq, String::from(tag)));
                 let word_id = self.last_key_id as i32;
+                self.last_key_id += 1;
 
                 self.cedar.update(word, word_id);
                 self.total += freq;
@@ -477,7 +477,8 @@ impl Jieba {
                         }
                         None => {
                             self.records.push(Record::new(freq, String::from(tag)));
-                            let word_id = (self.records.len() - 1) as i32;
+                            let word_id = (self.last_key_id) as i32;
+                            self.last_key_id += 1;
                             self.cedar.update(word, word_id);
                         }
                     };
@@ -486,7 +487,6 @@ impl Jieba {
             buf.clear();
         }
         self.total = self.records.iter().map(|n| n.freq).sum();
-        self.last_key_id = self.records.len();
 
         Ok(())
     }
