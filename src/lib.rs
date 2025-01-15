@@ -355,7 +355,8 @@ impl Jieba {
     /// instance.remove_word("我们");
     /// assert!(!instance.has_word("我们"), "The word '我们' should not be in the dictionary after removing the word");
     /// assert!(instance.has_word("我"), "The word '我' should be in the dictionary after adding the word");
-    /// instance.remove_word("我们");
+    /// let result = instance.remove_word("我们");
+    /// assert!(!result, "The word '我们' should not be in the dictionary after removing the word");
     /// ```
     pub fn remove_word(&mut self, word: &str) -> bool {
         if let Some((word_id, _, _)) = self.cedar.exact_match_search(word) {
