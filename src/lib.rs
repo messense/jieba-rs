@@ -355,6 +355,7 @@ impl Jieba {
     /// instance.remove_word("我们");
     /// assert!(!instance.has_word("我们"), "The word '我们' should not be in the dictionary after removing the word");
     /// assert!(instance.has_word("我"), "The word '我' should be in the dictionary after adding the word");
+    /// instance.remove_word("我们");
     /// ```
     pub fn remove_word(&mut self, word: &str) -> bool {
         if let Some((word_id, _, _)) = self.cedar.exact_match_search(word) {
@@ -380,7 +381,6 @@ impl Jieba {
     ///
     /// `freq`: if `None`, will be given by [suggest_freq](#method.suggest_freq)
     ///
-
     /// `tag`: if `None`, will be given `""`
     pub fn add_word(&mut self, word: &str, freq: Option<usize>, tag: Option<&str>) -> usize {
         let freq = freq.unwrap_or_else(|| self.suggest_freq(word));
