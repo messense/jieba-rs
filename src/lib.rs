@@ -233,7 +233,6 @@ pub struct Jieba {
     records: Vec<Record>,
     cedar: Cedar,
     total: usize,
-    longest_word_len: usize,
 }
 
 #[cfg(feature = "default-dict")]
@@ -250,7 +249,6 @@ impl Jieba {
             records: Vec::new(),
             cedar: Cedar::new(),
             total: 0,
-            longest_word_len: 0,
         }
     }
 
@@ -277,7 +275,6 @@ impl Jieba {
     /// 1. Clears the `records` list, removing all entries.
     /// 2. Resets `cedar` to a new instance of `Cedar`.
     /// 3. Sets `total` to 0, resetting the count.
-    /// 4. Sets `longest_word_len` to 0, resetting the longest word length tracker.
     ///
     /// # Arguments
     ///
@@ -297,7 +294,6 @@ impl Jieba {
         self.records.clear();
         self.cedar = Cedar::new();
         self.total = 0;
-        self.longest_word_len = 0;
     }
 
     /// Loads the default dictionary into the instance.
@@ -376,12 +372,6 @@ impl Jieba {
             self.cedar.erase(word);
             self.records[word_id].mark_deleted();
             self.total -= freq;
-
-            // let word_len = word.chars().count();
-            // if word_len == self.longest_word_len {
-            //     self.update_longest_word_len();
-            // }
-
             true
         } else {
             false
@@ -413,11 +403,6 @@ impl Jieba {
                 self.total += freq;
             }
         };
-
-        let curr_word_len = word.chars().count();
-        if self.longest_word_len < curr_word_len {
-            self.longest_word_len = curr_word_len;
-        }
 
         freq
     }
@@ -451,7 +436,6 @@ impl Jieba {
     pub fn load_dict<R: BufRead>(&mut self, dict: &mut R) -> Result<(), Error> {
         let mut buf = String::new();
         self.total = 0;
-        self.longest_word_len = 0;
 
         let mut line_no = 0;
         while dict.read_line(&mut buf)? > 0 {
@@ -471,11 +455,6 @@ impl Jieba {
                         })
                         .unwrap_or(Ok(0))?;
                     let tag = iter.next().unwrap_or("");
-
-                    let curr_word_len = word.chars().count();
-                    if self.longest_word_len < curr_word_len {
-                        self.longest_word_len = curr_word_len;
-                    }
 
                     match self.cedar.exact_match_search(word) {
                         Some((word_id, _, _)) => {
