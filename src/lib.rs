@@ -378,6 +378,16 @@ impl Jieba {
         }
     }
 
+    /// Find the last deleted word_id
+    fn find_last_deleted(&self) -> Option<usize> {
+        for (i, record) in self.records.iter().enumerate().rev() {
+            if record.deleted {
+                return Some(i);
+            }
+        }
+        None
+    }
+
     /// Add word to dict, return `freq`
     ///
     /// `freq`: if `None`, will be given by [suggest_freq](#method.suggest_freq)
@@ -396,8 +406,14 @@ impl Jieba {
                 self.total -= old_freq;
             }
             None => {
-                let word_id = self.records.len() as i32;
-                self.records.push(Record::new(freq, String::from(tag)));
+                let word_id = if let Some(id) = self.find_last_deleted() {
+                    self.records[id] = Record::new(freq, String::from(tag));
+                    id
+                } else {
+                    let id = self.records.len();
+                    self.records.push(Record::new(freq, String::from(tag)));
+                    id
+                } as i32;
 
                 self.cedar.update(word, word_id);
                 self.total += freq;
@@ -1560,10 +1576,15 @@ mod tests {
     #[test]
     fn test_remove_word() {
         let mut jieba = Jieba::new();
+        let id = jieba.records.len() as i32;
         jieba.add_word("开-始测-试", Some(300), None);
         assert_eq!(jieba.suggest_freq("开-始测-试"), 300);
+        let (word_id_before, _, _) = jieba.cedar.exact_match_search("开-始测-试").unwrap();
+        assert_eq!(word_id_before, id, "word_id should be len()");
         jieba.remove_word("开-始测-试");
         jieba.add_word("开-始测-试", Some(301), None);
         assert_eq!(jieba.suggest_freq("开-始测-试"), 301);
+        let (word_id_after, _, _) = jieba.cedar.exact_match_search("开-始测-试").unwrap();
+        assert_eq!(word_id_before, word_id_after, "word_id should be reused after removal");
     }
 }
