@@ -247,11 +247,8 @@ impl Jieba {
     /// Requires `default-dict` feature to be enabled.
     #[cfg(feature = "default-dict")]
     pub fn new() -> Self {
-        use std::io::BufReader;
-
         let mut instance = Self::empty();
-        let mut default_dict = BufReader::new(DEFAULT_DICT.as_bytes());
-        instance.load_dict(&mut default_dict).unwrap();
+        instance.load_default_dict();
         instance
     }
 
@@ -261,6 +258,35 @@ impl Jieba {
         instance.load_dict(dict)?;
         Ok(instance)
     }
+
+    /// Loads the default dictionary into the instance.
+    ///
+    /// This method reads the default dictionary from a predefined byte slice (`DEFAULT_DICT`)
+    /// and loads it into the current instance using the `load_dict` method.
+    ///
+    /// # Arguments
+    ///
+    /// * `&mut self` - Mutable reference to the current instance.
+    ///
+    /// Requires `default-dict` feature to be enabled.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use jieba_rs::Jieba;
+    ///
+    /// let mut instance = Jieba::empty();
+    /// instance.load_default_dict(); // Loads the default dictionary into the instance
+    /// assert!(instance.has_word("我们"), "The word '我们' should be in the dictionary after loading the default dictionary");
+    /// ```
+    #[cfg(feature = "default-dict")]
+    pub fn load_default_dict(&mut self) {
+        use std::io::BufReader;
+
+        let mut default_dict = BufReader::new(DEFAULT_DICT.as_bytes());
+        self.load_dict(&mut default_dict).unwrap();
+    }
+
     /// Add word to dict, return `freq`
     ///
     /// `freq`: if `None`, will be given by [suggest_freq](#method.suggest_freq)
