@@ -223,7 +223,6 @@ pub struct Jieba {
     records: Vec<Record>,
     cedar: Cedar,
     total: usize,
-    longest_word_len: usize,
 }
 
 #[cfg(feature = "default-dict")]
@@ -240,7 +239,6 @@ impl Jieba {
             records: Vec::new(),
             cedar: Cedar::new(),
             total: 0,
-            longest_word_len: 0,
         }
     }
 
@@ -289,11 +287,6 @@ impl Jieba {
             }
         };
 
-        let curr_word_len = word.chars().count();
-        if self.longest_word_len < curr_word_len {
-            self.longest_word_len = curr_word_len;
-        }
-
         freq
     }
 
@@ -301,7 +294,6 @@ impl Jieba {
     pub fn load_dict<R: BufRead>(&mut self, dict: &mut R) -> Result<(), Error> {
         let mut buf = String::new();
         self.total = 0;
-        self.longest_word_len = 0;
 
         let mut line_no = 0;
         while dict.read_line(&mut buf)? > 0 {
@@ -321,11 +313,6 @@ impl Jieba {
                         })
                         .unwrap_or(Ok(0))?;
                     let tag = iter.next().unwrap_or("");
-
-                    let curr_word_len = word.chars().count();
-                    if self.longest_word_len < curr_word_len {
-                        self.longest_word_len = curr_word_len;
-                    }
 
                     match self.cedar.exact_match_search(word) {
                         Some((word_id, _, _)) => {

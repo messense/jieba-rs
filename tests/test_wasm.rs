@@ -1,3 +1,5 @@
+#![cfg(target_arch = "wasm32")]
+
 use jieba_rs::Jieba;
 use wasm_bindgen_test::*;
 
