@@ -290,6 +290,19 @@ impl Jieba {
         freq
     }
 
+    /// Checks if a word exists in the dictionary.
+    ///
+    /// # Arguments
+    ///
+    /// * `word` - The word to check.
+    ///
+    /// # Returns
+    ///
+    /// * `bool` - Whether the word exists in the dictionary.
+    pub fn has_word(&self, word: &str) -> bool {
+        self.cedar.exact_match_search(word).is_some()
+    }
+
     /// Load dictionary
     pub fn load_dict<R: BufRead>(&mut self, dict: &mut R) -> Result<(), Error> {
         let mut buf = String::new();
@@ -795,6 +808,14 @@ mod tests {
     #[test]
     fn test_init_with_default_dict() {
         let _ = Jieba::new();
+    }
+
+    #[test]
+    fn test_has_word() {
+        let jieba = Jieba::new();
+        assert!(jieba.has_word("中国"));
+        assert!(jieba.has_word("开源"));
+        assert!(!jieba.has_word("不存在的词"));
     }
 
     #[test]
