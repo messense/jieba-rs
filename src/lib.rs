@@ -293,6 +293,9 @@ impl Jieba {
     ///
     /// `tag`: if `None`, will be given `""`
     pub fn add_word(&mut self, word: &str, freq: Option<usize>, tag: Option<&str>) -> usize {
+        if word.is_empty() {
+            return 0;
+        }
         let freq = freq.unwrap_or_else(|| self.suggest_freq(word));
         let tag = tag.unwrap_or("");
 
