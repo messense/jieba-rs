@@ -335,8 +335,8 @@ impl Jieba {
                 self.total -= old_freq;
             }
             None => {
+                let word_id = self.records.len() as i32;
                 self.records.push(Record::new(freq, String::from(tag)));
-                let word_id = (self.records.len() - 1) as i32;
 
                 self.cedar.update(word, word_id);
                 self.total += freq;
@@ -359,7 +359,29 @@ impl Jieba {
         self.cedar.exact_match_search(word).is_some()
     }
 
-    /// Load dictionary
+    /// Loads a dictionary by adding entries to the existing dictionary rather than resetting it.
+    ///
+    /// This function reads from a `BufRead` source, parsing each line as a dictionary entry. Each entry
+    /// is expected to contain a word, its frequency, and optionally a tag.
+    ///
+    /// # Type Parameters
+    ///
+    /// * `R`: A type that implements the `BufRead` trait, used for reading lines from the dictionary.
+    ///
+    /// # Arguments
+    ///
+    /// * `dict` - A mutable reference to a `BufRead` source containing the dictionary entries.
+    ///
+    /// # Returns
+    ///
+    /// * `Result<(), Error>` - Returns `Ok(())` if the dictionary is successfully loaded; otherwise,
+    ///   returns an error describing what went wrong.
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if:
+    /// * There is an issue reading from the provided `BufRead` source.
+    /// * A line in the dictionary file contains invalid frequency data (not a valid integer).
     pub fn load_dict<R: BufRead>(&mut self, dict: &mut R) -> Result<(), Error> {
         let mut buf = String::new();
         self.total = 0;
@@ -388,8 +410,8 @@ impl Jieba {
                             self.records[word_id as usize].freq = freq;
                         }
                         None => {
+                            let word_id = self.records.len() as i32;
                             self.records.push(Record::new(freq, String::from(tag)));
-                            let word_id = (self.records.len() - 1) as i32;
                             self.cedar.update(word, word_id);
                         }
                     };
