@@ -287,6 +287,33 @@ impl Jieba {
         self.load_dict(&mut default_dict).unwrap();
     }
 
+    /// Clears all data
+    ///
+    /// This method performs the following actions:
+    /// 1. Clears the `records` list, removing all entries.
+    /// 2. Resets `cedar` to a new instance of `Cedar`.
+    /// 3. Sets `total` to 0, resetting the count.
+    ///
+    /// # Arguments
+    ///
+    /// * `&mut self` - Mutable reference to the current instance.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use jieba_rs::Jieba;
+    ///
+    /// let mut instance = Jieba::new();
+    /// assert!(instance.has_word("我们"), "The word '我们' should be in the dictionary after loading the default dictionary");
+    /// instance.clear(); // clear all dict data
+    /// assert!(!instance.has_word("我们"), "The word '我们' should not be in the dictionary after clearing the dictionary");
+    /// ```
+    pub fn clear(&mut self) {
+        self.records.clear();
+        self.cedar = Cedar::new();
+        self.total = 0;
+    }
+
     /// Add word to dict, return `freq`
     ///
     /// `freq`: if `None`, will be given by [suggest_freq](#method.suggest_freq)
