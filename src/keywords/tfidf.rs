@@ -17,13 +17,13 @@ struct HeapNode<'a> {
     word: &'a str,
 }
 
-impl<'a> Ord for HeapNode<'a> {
+impl Ord for HeapNode<'_> {
     fn cmp(&self, other: &HeapNode) -> Ordering {
         other.tfidf.cmp(&self.tfidf).then_with(|| self.word.cmp(other.word))
     }
 }
 
-impl<'a> PartialOrd for HeapNode<'a> {
+impl PartialOrd for HeapNode<'_> {
     fn partial_cmp(&self, other: &HeapNode) -> Option<Ordering> {
         Some(self.cmp(other))
     }
