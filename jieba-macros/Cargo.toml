@@ -13,4 +13,4 @@ edition = "2021"
 proc-macro = true
 
 [dependencies]
-phf_codegen = "0.11"
+phf_codegen = { workspace = true }
