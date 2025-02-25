@@ -6,7 +6,7 @@ edition = "2021"
 
 [dependencies]
 jieba-rs = { version = "0.7.0", path = "../", features = ["textrank", "tfidf"] }
-c_fixed_string = "0.2.0"
+c_fixed_string = { workspace = true }
 
 [lib]
 crate-type = ["cdylib"]

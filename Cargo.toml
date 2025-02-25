@@ -14,9 +14,9 @@ edition = '2021'
 all-features = true
 
 [dev-dependencies]
-codspeed-criterion-compat = "2.4.1"
-rand = "0.8"
-wasm-bindgen-test = "0.3.0"
+codspeed-criterion-compat = { workspace = true }
+rand = { workspace = true }
+wasm-bindgen-test = { workspace = true }
 
 [target.'cfg(unix)'.dev-dependencies]
 jemallocator = "0.5.0"
@@ -27,15 +27,15 @@ harness = false
 required-features = ["tfidf", "textrank"]
 
 [dependencies]
-jieba-macros = { version = "0.7.1", path = "./jieba-macros" }
-cedarwood = "0.4"
-derive_builder = { version = "0.20.0", optional = true }
-fxhash = "0.2.1"
-include-flate = "0.3.0"
-lazy_static = "1.0"
-ordered-float = { version = "4.0", optional = true }
-phf = "0.11"
-regex = "1.0"
+jieba-macros = { workspace = true }
+cedarwood = { workspace = true }
+derive_builder = { workspace = true, optional = true }
+fxhash = { workspace = true }
+include-flate = { workspace = true }
+lazy_static = { workspace = true }
+ordered-float = { workspace = true, optional = true }
+phf = { workspace = true }
+regex = { workspace = true }
 
 [features]
 default = ["default-dict"]
@@ -45,3 +45,19 @@ textrank = ["dep:ordered-float", "dep:derive_builder"]
 
 [workspace]
 members = [".", "capi", "jieba-macros", "examples/weicheng"]
+
+[workspace.dependencies]
+c_fixed_string = "0.2.0"
+cedarwood = "0.4"
+codspeed-criterion-compat = "2.4.1"
+derive_builder = "0.20.0"
+fxhash = "0.2.1"
+include-flate = "0.3.0"
+jieba-macros = { version = "0.7.1", path = "jieba-macros" }
+lazy_static = "1.0"
+ordered-float = "4.0"
+phf = "0.11"
+phf_codegen = "0.11"
+rand = "0.8"
+regex = "1.0"
+wasm-bindgen-test = "0.3.0"
