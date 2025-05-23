@@ -1,14 +1,13 @@
 use std::cmp::Ordering;
 
-use lazy_static::lazy_static;
 use regex::Regex;
 
 use crate::SplitMatches;
 use jieba_macros::generate_hmm_data;
 
-lazy_static! {
-    static ref RE_HAN: Regex = Regex::new(r"([\u{4E00}-\u{9FD5}]+)").unwrap();
-    static ref RE_SKIP: Regex = Regex::new(r"([a-zA-Z0-9]+(?:.\d+)?%?)").unwrap();
+thread_local! {
+    static RE_HAN: Regex = Regex::new(r"([\u{4E00}-\u{9FD5}]+)").unwrap();
+    static RE_SKIP: Regex = Regex::new(r"([a-zA-Z0-9]+(?:.\d+)?%?)").unwrap();
 }
 
 pub const NUM_STATES: usize = 4;
@@ -190,29 +189,33 @@ pub(crate) fn cut_internal<'a>(sentence: &'a str, words: &mut Vec<&'a str>, hmm_
 
 #[allow(non_snake_case)]
 pub(crate) fn cut_with_allocated_memory<'a>(sentence: &'a str, words: &mut Vec<&'a str>, hmm_context: &mut HmmContext) {
-    let splitter = SplitMatches::new(&RE_HAN, sentence);
-    for state in splitter {
-        let block = state.into_str();
-        if block.is_empty() {
-            continue;
-        }
-        if RE_HAN.is_match(block) {
-            if block.chars().count() > 1 {
-                cut_internal(block, words, hmm_context);
-            } else {
-                words.push(block);
-            }
-        } else {
-            let skip_splitter = SplitMatches::new(&RE_SKIP, block);
-            for skip_state in skip_splitter {
-                let x = skip_state.into_str();
-                if x.is_empty() {
+    RE_HAN.with(|re_han| {
+        RE_SKIP.with(|re_skip| {
+            let splitter = SplitMatches::new(re_han, sentence);
+            for state in splitter {
+                let block = state.into_str();
+                if block.is_empty() {
                     continue;
                 }
-                words.push(x);
+                if re_han.is_match(block) {
+                    if block.chars().count() > 1 {
+                        cut_internal(block, words, hmm_context);
+                    } else {
+                        words.push(block);
+                    }
+                } else {
+                    let skip_splitter = SplitMatches::new(re_skip, block);
+                    for skip_state in skip_splitter {
+                        let x = skip_state.into_str();
+                        if x.is_empty() {
+                            continue;
+                        }
+                        words.push(x);
+                    }
+                }
             }
-        }
-    }
+        })
+    })
 }
 
 #[allow(non_snake_case)]
