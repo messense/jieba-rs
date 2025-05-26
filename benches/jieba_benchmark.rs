@@ -1,6 +1,7 @@
 use codspeed_criterion_compat::{black_box, criterion_group, criterion_main, Criterion, Throughput};
 use jieba_rs::{Jieba, KeywordExtract, TextRank, TfIdf, TokenizeMode};
 use lazy_static::lazy_static;
+use rayon::iter::{IntoParallelIterator, ParallelIterator};
 
 #[cfg(unix)]
 #[global_allocator]
@@ -56,6 +57,25 @@ fn criterion_benchmark(c: &mut Criterion) {
     });
     group.bench_function("textrank", |b| {
         b.iter(|| TEXTRANK_EXTRACTOR.extract_keywords(&JIEBA, black_box(SENTENCE), 3, Vec::new()))
+    });
+    group.finish();
+
+    let mut group = c.benchmark_group("multithreaded");
+    let repeat = 1000usize;
+    group.throughput(Throughput::Bytes(SENTENCE.len() as u64 * repeat as u64));
+    group.bench_function("single_thread", |b| {
+        b.iter(|| {
+            for _ in 0..repeat {
+                let _words = JIEBA.cut(black_box(&SENTENCE), true);
+            }
+        })
+    });
+    group.bench_function("multi_thread", |b| {
+        b.iter(|| {
+            (0..repeat).into_par_iter().for_each(|_| {
+                let _words = JIEBA.cut(black_box(&SENTENCE), true);
+            });
+        })
     });
     group.finish();
 }
