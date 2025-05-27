@@ -54,20 +54,11 @@ generate_hmm_data!();
 
 const MIN_FLOAT: f64 = -3.14e100;
 
+#[derive(Default)]
 pub(crate) struct HmmContext {
     v: Vec<f64>,
     prev: Vec<Option<State>>,
     best_path: Vec<State>,
-}
-
-impl HmmContext {
-    pub fn new(num_characters: usize) -> Self {
-        HmmContext {
-            v: vec![0.0; NUM_STATES * num_characters],
-            prev: vec![None; NUM_STATES * num_characters],
-            best_path: vec![State::Begin; num_characters],
-        }
-    }
 }
 
 #[allow(non_snake_case)]
@@ -220,7 +211,7 @@ pub(crate) fn cut_with_allocated_memory<'a>(sentence: &'a str, words: &mut Vec<&
 
 #[allow(non_snake_case)]
 pub fn cut<'a>(sentence: &'a str, words: &mut Vec<&'a str>) {
-    let mut hmm_context = HmmContext::new(sentence.chars().count());
+    let mut hmm_context = HmmContext::default();
 
     cut_with_allocated_memory(sentence, words, &mut hmm_context)
 }
@@ -236,7 +227,7 @@ mod tests {
 
         let sentence = "小明硕士毕业于中国科学院计算所";
 
-        let mut hmm_context = HmmContext::new(sentence.chars().count());
+        let mut hmm_context = HmmContext::default();
         viterbi(sentence, &mut hmm_context);
         assert_eq!(
             hmm_context.best_path,
