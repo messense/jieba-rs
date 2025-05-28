@@ -658,7 +658,7 @@ impl Jieba {
                 let mut route = Vec::with_capacity(heuristic_capacity);
                 let mut dag = StaticSparseDAG::with_size_hint(heuristic_capacity);
 
-                let mut hmm_context = hmm::HmmContext::new(sentence.chars().count());
+                let mut hmm_context = hmm::HmmContext::default();
 
                 for state in splitter {
                     match state {
