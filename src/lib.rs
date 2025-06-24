@@ -141,6 +141,19 @@ impl<'t> SplitState<'t> {
             SplitState::Matched(matched) => matched.as_str(),
         }
     }
+
+    #[inline]
+    fn as_str(&self) -> &'t str {
+        match self {
+            SplitState::Unmatched(t) => t,
+            SplitState::Matched(matched) => matched.as_str(),
+        }
+    }
+
+    #[inline]
+    pub fn is_matched(&self) -> bool {
+        matches!(self, SplitState::Matched(_))
+    }
 }
 
 impl<'t> Iterator for SplitMatches<'_, 't> {
@@ -454,11 +467,7 @@ impl Jieba {
             let pair = dag
                 .iter_edges(byte_start)
                 .map(|byte_end| {
-                    let wfrag = if byte_end == str_len {
-                        &sentence[byte_start..]
-                    } else {
-                        &sentence[byte_start..byte_end]
-                    };
+                    let wfrag = &sentence[byte_start..byte_end];
 
                     let freq = if let Some((word_id, _, _)) = self.cedar.exact_match_search(wfrag) {
                         self.records[word_id as usize].freq
@@ -528,11 +537,7 @@ impl Jieba {
 
         while x < sentence.len() {
             let y = route[x].1;
-            let l_str = if y < sentence.len() {
-                &sentence[x..y]
-            } else {
-                &sentence[x..]
-            };
+            let l_str = &sentence[x..y];
 
             if l_str.chars().count() == 1 && l_str.chars().all(|ch| ch.is_ascii_alphanumeric()) {
                 if left.is_none() {
@@ -545,13 +550,7 @@ impl Jieba {
                     left = None;
                 }
 
-                let word = if y < sentence.len() {
-                    &sentence[x..y]
-                } else {
-                    &sentence[x..]
-                };
-
-                words.push(word);
+                words.push(l_str);
             }
             x = y;
         }
@@ -589,12 +588,7 @@ impl Jieba {
             } else {
                 if let Some(byte_start) = left {
                     let byte_end = x;
-                    let word = if byte_end < sentence.len() {
-                        &sentence[byte_start..byte_end]
-                    } else {
-                        &sentence[byte_start..]
-                    };
-
+                    let word = &sentence[byte_start..byte_end];
                     if word.chars().count() == 1 {
                         words.push(word);
                     } else if self.cedar.exact_match_search(word).is_none() {
@@ -611,11 +605,7 @@ impl Jieba {
                     }
                     left = None;
                 }
-                let word = if y < sentence.len() {
-                    &sentence[x..y]
-                } else {
-                    &sentence[x..]
-                };
+                let word = &sentence[x..y];
                 words.push(word);
             }
             x = y;
@@ -680,11 +670,11 @@ impl Jieba {
 
                             let skip_splitter = SplitMatches::new(re_skip, block);
                             for skip_state in skip_splitter {
-                                let word = skip_state.into_str();
+                                let word = skip_state.as_str();
                                 if word.is_empty() {
                                     continue;
                                 }
-                                if cut_all || re_skip.is_match(word) {
+                                if cut_all || skip_state.is_matched() {
                                     words.push(word);
                                 } else {
                                     let mut word_indices = word.char_indices().map(|x| x.0).peekable();
@@ -986,6 +976,16 @@ mod tests {
         let jieba = Jieba::new();
         let words = jieba.cut("abc网球拍卖会def", false);
         assert_eq!(words, vec!["abc", "网球", "拍卖会", "def"]);
+    }
+
+    #[test]
+    fn test_cut_no_hmm1() {
+        let jieba = Jieba::new();
+        let words = jieba.cut("abc网球拍卖会def！！？\r\n\t", false);
+        assert_eq!(
+            words,
+            vec!["abc", "网球", "拍卖会", "def", "！", "！", "？", "\r\n", "\t"]
+        );
     }
 
     #[test]
