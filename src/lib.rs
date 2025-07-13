@@ -135,14 +135,6 @@ pub(crate) enum SplitState<'t> {
 
 impl<'t> SplitState<'t> {
     #[inline]
-    fn into_str(self) -> &'t str {
-        match self {
-            SplitState::Unmatched(t) => t,
-            SplitState::Matched(matched) => matched.as_str(),
-        }
-    }
-
-    #[inline]
     fn as_str(&self) -> &'t str {
         match self {
             SplitState::Unmatched(t) => t,
@@ -653,7 +645,7 @@ impl Jieba {
                 for state in splitter {
                     match state {
                         SplitState::Matched(_) => {
-                            let block = state.into_str();
+                            let block = state.as_str();
                             assert!(!block.is_empty());
 
                             if cut_all {
@@ -665,7 +657,7 @@ impl Jieba {
                             }
                         }
                         SplitState::Unmatched(_) => {
-                            let block = state.into_str();
+                            let block = state.as_str();
                             assert!(!block.is_empty());
 
                             let skip_splitter = SplitMatches::new(re_skip, block);
@@ -901,11 +893,11 @@ mod tests {
             for state in splitter {
                 match state {
                     SplitState::Matched(_) => {
-                        let block = state.into_str();
+                        let block = state.as_str();
                         assert!(!block.is_empty());
                     }
                     SplitState::Unmatched(_) => {
-                        let block = state.into_str();
+                        let block = state.as_str();
                         assert!(!block.is_empty());
                     }
                 }
@@ -918,7 +910,7 @@ mod tests {
         RE_HAN_DEFAULT.with(|re_han| {
             let splitter = SplitMatches::new(re_han, "讥䶯䶰䶱䶲䶳䶴䶵𦡦");
 
-            let result: Vec<&str> = splitter.map(|x| x.into_str()).collect();
+            let result: Vec<&str> = splitter.map(|x| x.as_str()).collect();
             assert_eq!(result, vec!["讥䶯䶰䶱䶲䶳䶴䶵𦡦"]);
         });
     }

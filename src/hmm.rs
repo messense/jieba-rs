@@ -184,7 +184,7 @@ pub(crate) fn cut_with_allocated_memory<'a>(sentence: &'a str, words: &mut Vec<&
         RE_SKIP.with(|re_skip| {
             let splitter = SplitMatches::new(re_han, sentence);
             for state in splitter {
-                let block = state.into_str();
+                let block = state.as_str();
                 if block.is_empty() {
                     continue;
                 }
@@ -197,7 +197,7 @@ pub(crate) fn cut_with_allocated_memory<'a>(sentence: &'a str, words: &mut Vec<&
                 } else {
                     let skip_splitter = SplitMatches::new(re_skip, block);
                     for skip_state in skip_splitter {
-                        let x = skip_state.into_str();
+                        let x = skip_state.as_str();
                         if x.is_empty() {
                             continue;
                         }
