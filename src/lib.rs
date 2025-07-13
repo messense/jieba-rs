@@ -94,7 +94,7 @@ mod errors;
 mod hmm;
 #[cfg(any(feature = "tfidf", feature = "textrank"))]
 mod keywords;
-mod sparse_dag;
+pub mod sparse_dag;
 
 #[cfg(feature = "default-dict")]
 flate!(static DEFAULT_DICT: str from "src/data/dict.txt");
