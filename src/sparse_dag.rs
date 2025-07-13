@@ -1,6 +1,6 @@
 use crate::FxHashMap as HashMap;
 
-pub struct StaticSparseDAG {
+pub(crate) struct StaticSparseDAG {
     array: Vec<usize>,
     start_pos: HashMap<usize, usize>,
     size_hint_for_iterator: usize,
@@ -32,7 +32,7 @@ impl Iterator for EdgeIter<'_> {
 }
 
 impl StaticSparseDAG {
-    pub fn with_size_hint(hint: usize) -> Self {
+    pub(crate) fn with_size_hint(hint: usize) -> Self {
         // Cap the allocation to prevent memory issues with very large inputs
         // The theoretical maximum should be much smaller than hint * 5 for most practical cases
         const MAX_CAPACITY: usize = 1_000_000; // 1M elements = ~8MB on 64-bit systems
