@@ -149,8 +149,9 @@ impl KeywordExtract for TextRank {
             allowed_pos_set.insert(s);
         }
 
-        let mut word2id: HashMap<String, usize> = HashMap::default();
-        let mut unique_words = Vec::new();
+        let mut word2id: HashMap<String, usize> =
+            HashMap::with_capacity_and_hasher(tags.len() / 2, fxhash::FxBuildHasher::default());
+        let mut unique_words = Vec::with_capacity(tags.len() / 2);
         for t in &tags {
             if !allowed_pos_set.is_empty() && !allowed_pos_set.contains(t.tag) {
                 continue;
@@ -211,7 +212,7 @@ impl KeywordExtract for TextRank {
             }
         }
 
-        let mut res = Vec::new();
+        let mut res = Vec::with_capacity(top_k);
         for _ in 0..top_k {
             if let Some(w) = heap.pop() {
                 res.push(Keyword {

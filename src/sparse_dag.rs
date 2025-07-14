@@ -34,11 +34,13 @@ impl Iterator for EdgeIter<'_> {
 impl StaticSparseDAG {
     pub(crate) fn with_size_hint(hint: usize) -> Self {
         // Cap the allocation to prevent memory issues with very large inputs
-        // The theoretical maximum should be much smaller than hint * 5 for most practical cases
-        const MAX_CAPACITY: usize = 4_000_000; // 1M elements = ~32MB on 64-bit systems
-        const MULTIPLIER: usize = 5;
+        // Use a more conservative multiplier to reduce memory overhead
+        const MAX_CAPACITY: usize = 4_000_000;
+        const MULTIPLIER: usize = 4; // Reduced from 5 to 4
+        const MIN_CAPACITY: usize = 32; // Minimum useful capacity
 
-        let capacity = std::cmp::min(hint * MULTIPLIER, MAX_CAPACITY);
+        let capacity = std::cmp::max(std::cmp::min(hint * MULTIPLIER, MAX_CAPACITY), MIN_CAPACITY);
+
         StaticSparseDAG {
             array: Vec::with_capacity(capacity),
             start_pos: HashMap::default(),

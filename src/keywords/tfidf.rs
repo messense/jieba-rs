@@ -248,7 +248,7 @@ impl KeywordExtract for TfIdf {
             }
         }
 
-        let mut res = Vec::new();
+        let mut res = Vec::with_capacity(top_k);
         for _ in 0..top_k {
             if let Some(w) = heap.pop() {
                 res.push(Keyword {
