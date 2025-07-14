@@ -106,6 +106,7 @@ thread_local! {
     static RE_SKIP_DEFAULT: Regex = Regex::new(r"(\r\n|\s)").unwrap();
     static RE_HAN_CUT_ALL: Regex = Regex::new(r"([\u{3400}-\u{4DBF}\u{4E00}-\u{9FFF}\u{F900}-\u{FAFF}\u{20000}-\u{2A6DF}\u{2A700}-\u{2B73F}\u{2B740}-\u{2B81F}\u{2B820}-\u{2CEAF}\u{2CEB0}-\u{2EBEF}\u{2F800}-\u{2FA1F}]+)").unwrap();
     static RE_SKIP_CUT_ALL: Regex = Regex::new(r"[^a-zA-Z0-9+#\n]").unwrap();
+    static HMM_CONTEXT: std::cell::RefCell<hmm::HmmContext> = std::cell::RefCell::new(hmm::HmmContext::default());
 }
 
 struct SplitMatches<'r, 't> {
@@ -640,8 +641,6 @@ impl Jieba {
                 let mut route = Vec::with_capacity(heuristic_capacity);
                 let mut dag = StaticSparseDAG::with_size_hint(heuristic_capacity);
 
-                let mut hmm_context = hmm::HmmContext::default();
-
                 for state in splitter {
                     match state {
                         SplitState::Matched(_) => {
@@ -651,7 +650,10 @@ impl Jieba {
                             if cut_all {
                                 self.cut_all_internal(block, &mut words);
                             } else if hmm {
-                                self.cut_dag_hmm(block, &mut words, &mut route, &mut dag, &mut hmm_context);
+                                HMM_CONTEXT.with(|ctx| {
+                                    let mut hmm_context = ctx.borrow_mut();
+                                    self.cut_dag_hmm(block, &mut words, &mut route, &mut dag, &mut hmm_context);
+                                });
                             } else {
                                 self.cut_dag_no_hmm(block, &mut words, &mut route, &mut dag);
                             }
