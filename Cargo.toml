@@ -15,7 +15,6 @@ all-features = true
 
 [dev-dependencies]
 codspeed-criterion-compat = { workspace = true }
-rand = { workspace = true }
 wasm-bindgen-test = { workspace = true }
 rayon = { workspace = true }
 
@@ -50,16 +49,15 @@ members = [".", "capi", "jieba-macros", "examples/weicheng"]
 [workspace.dependencies]
 c_fixed_string = "0.2.0"
 cedarwood = "0.4"
-codspeed-criterion-compat = "2.4.1"
+codspeed-criterion-compat = "3.0.4"
 derive_builder = "0.20.0"
 fxhash = "0.2.1"
 include-flate = "0.3.0"
 jieba-macros = { version = "0.7.1", path = "jieba-macros" }
 lazy_static = "1.0"
-ordered-float = "4.0"
-phf = "0.11"
-phf_codegen = "0.11"
-rand = "0.8"
+ordered-float = "5.0"
+phf = "0.12.1"
+phf_codegen = "0.12.1"
 rayon = "1.10"
-regex = "1.0"
+regex = "1.11.1"
 wasm-bindgen-test = "0.3.0"
