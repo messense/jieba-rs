@@ -69,7 +69,7 @@ impl StaticSparseDAG {
     }
 
     #[inline]
-    pub(crate) fn iter_edges(&self, from: usize) -> EdgeIter {
+    pub(crate) fn iter_edges(&self, from: usize) -> EdgeIter<'_> {
         let cursor = self.start_pos.get(&from).unwrap().to_owned();
 
         EdgeIter { dag: self, cursor }
