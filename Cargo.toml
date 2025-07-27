@@ -32,7 +32,6 @@ cedarwood = { workspace = true }
 derive_builder = { workspace = true, optional = true }
 fxhash = { workspace = true }
 include-flate = { workspace = true }
-lazy_static = { workspace = true }
 ordered-float = { workspace = true, optional = true }
 phf = { workspace = true }
 regex = { workspace = true }
@@ -58,7 +57,6 @@ derive_builder = "0.20.0"
 fxhash = "0.2.1"
 include-flate = "0.3.0"
 jieba-macros = { version = "0.7.1", path = "jieba-macros" }
-lazy_static = "1.0"
 ordered-float = "5.0"
 phf = "0.12.1"
 phf_codegen = "0.12.1"

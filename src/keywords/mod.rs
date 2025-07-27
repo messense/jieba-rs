@@ -1,27 +1,24 @@
-use derive_builder::Builder;
-use lazy_static::lazy_static;
-use std::collections::BTreeSet;
-
 use crate::Jieba;
+use derive_builder::Builder;
+use std::collections::BTreeSet;
+use std::sync::LazyLock;
 
 #[cfg(feature = "textrank")]
 pub mod textrank;
 #[cfg(feature = "tfidf")]
 pub mod tfidf;
 
-lazy_static! {
-    pub static ref DEFAULT_STOP_WORDS: BTreeSet<String> = {
-        BTreeSet::from_iter(
-            [
-                "the", "of", "is", "and", "to", "in", "that", "we", "for", "an", "are", "by", "be", "as", "on", "with",
-                "can", "if", "from", "which", "you", "it", "this", "then", "at", "have", "all", "not", "one", "has",
-                "or", "that",
-            ]
-            .into_iter()
-            .map(|s| s.to_string()),
-        )
-    };
-}
+pub static DEFAULT_STOP_WORDS: LazyLock<BTreeSet<String>> = LazyLock::new(|| {
+    BTreeSet::from_iter(
+        [
+            "the", "of", "is", "and", "to", "in", "that", "we", "for", "an", "are", "by", "be", "as", "on", "with",
+            "can", "if", "from", "which", "you", "it", "this", "then", "at", "have", "all", "not", "one", "has", "or",
+            "that",
+        ]
+        .into_iter()
+        .map(|s| s.to_string()),
+    )
+});
 
 /// Keyword with weight
 #[derive(Debug, Clone, PartialEq)]

@@ -1,17 +1,15 @@
-use codspeed_criterion_compat::{black_box, criterion_group, criterion_main, Criterion, Throughput};
+use codspeed_criterion_compat::{Criterion, Throughput, black_box, criterion_group, criterion_main};
 use jieba_rs::{Jieba, KeywordExtract, TextRank, TfIdf, TokenizeMode};
-use lazy_static::lazy_static;
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
+use std::sync::LazyLock;
 
 #[cfg(unix)]
 #[global_allocator]
 static ALLOC: jemallocator::Jemalloc = jemallocator::Jemalloc;
 
-lazy_static! {
-    static ref JIEBA: Jieba = Jieba::new();
-    static ref TFIDF_EXTRACTOR: TfIdf = TfIdf::default();
-    static ref TEXTRANK_EXTRACTOR: TextRank = TextRank::default();
-}
+static JIEBA: LazyLock<Jieba> = LazyLock::new(Jieba::new);
+static TFIDF_EXTRACTOR: LazyLock<TfIdf> = LazyLock::new(TfIdf::default);
+static TEXTRANK_EXTRACTOR: LazyLock<TextRank> = LazyLock::new(TextRank::default);
 static SENTENCE: &str = "我是拖拉机学院手扶拖拉机专业的。不用多久，我就会升职加薪，当上CEO，走上人生巅峰。";
 
 fn criterion_benchmark(c: &mut Criterion) {
