@@ -8,7 +8,7 @@ keywords = ["nlp", "chinese", "segmenation"]
 license = "MIT"
 readme = "README.md"
 repository = "https://github.com/messense/jieba-rs"
-edition = '2021'
+edition.workspace = true
 
 [package.metadata.docs.rs]
 all-features = true
@@ -44,7 +44,11 @@ tfidf = ["dep:ordered-float", "dep:derive_builder"]
 textrank = ["dep:ordered-float", "dep:derive_builder"]
 
 [workspace]
+resolver = "3"
 members = [".", "capi", "jieba-macros", "examples/weicheng"]
+
+[workspace.package]
+edition = "2024"
 
 [workspace.dependencies]
 c_fixed_string = "0.2.0"
