@@ -88,7 +88,7 @@ pub use crate::keywords::textrank::TextRank;
 #[cfg(feature = "tfidf")]
 pub use crate::keywords::tfidf::TfIdf;
 #[cfg(any(feature = "tfidf", feature = "textrank"))]
-pub use crate::keywords::{Keyword, KeywordExtract, KeywordExtractConfig, DEFAULT_STOP_WORDS};
+pub use crate::keywords::{DEFAULT_STOP_WORDS, Keyword, KeywordExtract, KeywordExtractConfig};
 
 mod errors;
 mod hmm;
@@ -869,7 +869,7 @@ impl Jieba {
 
 #[cfg(test)]
 mod tests {
-    use super::{Jieba, SplitMatches, SplitState, Tag, Token, TokenizeMode, RE_HAN_DEFAULT};
+    use super::{Jieba, RE_HAN_DEFAULT, SplitMatches, SplitState, Tag, Token, TokenizeMode};
     use std::io::BufReader;
 
     #[test]
