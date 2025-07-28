@@ -5,7 +5,7 @@ use std::sync::LazyLock;
 
 #[cfg(unix)]
 #[global_allocator]
-static ALLOC: jemallocator::Jemalloc = jemallocator::Jemalloc;
+static ALLOC: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 
 static JIEBA: LazyLock<Jieba> = LazyLock::new(Jieba::new);
 static TFIDF_EXTRACTOR: LazyLock<TfIdf> = LazyLock::new(TfIdf::default);

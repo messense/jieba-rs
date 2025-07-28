@@ -19,7 +19,7 @@ wasm-bindgen-test = { workspace = true }
 rayon = { workspace = true }
 
 [target.'cfg(unix)'.dev-dependencies]
-jemallocator = "0.5.0"
+tikv-jemallocator = "0.6.0"
 
 [[bench]]
 name = "jieba_benchmark"
