@@ -2,10 +2,10 @@
 name = "weicheng"
 version = "0.1.0"
 authors = ["messense <messense@icloud.com>"]
-edition = "2021"
+edition.workspace = true
 
 [dependencies]
 jieba-rs = { path = "../.." }
 
 [target.'cfg(unix)'.dependencies]
-jemallocator = "0.5.0"
+tikv-jemallocator = "0.6.0"

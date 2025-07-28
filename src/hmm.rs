@@ -218,7 +218,7 @@ pub fn cut<'a>(sentence: &'a str, words: &mut Vec<&'a str>) {
 
 #[cfg(test)]
 mod tests {
-    use super::{cut, viterbi, HmmContext};
+    use super::{HmmContext, cut, viterbi};
 
     #[test]
     #[allow(non_snake_case)]
@@ -231,7 +231,9 @@ mod tests {
         viterbi(sentence, &mut hmm_context);
         assert_eq!(
             hmm_context.best_path,
-            vec![Begin, End, Begin, End, Begin, Middle, End, Begin, End, Begin, Middle, End, Begin, End, Single]
+            vec![
+                Begin, End, Begin, End, Begin, Middle, End, Begin, End, Begin, Middle, End, Begin, End, Single
+            ]
         );
     }
 
