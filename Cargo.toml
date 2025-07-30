@@ -1,6 +1,6 @@
 [package]
 name = "jieba-rs"
-version = "0.7.4"
+version = "0.8.0"
 authors = ["messense <messense@icloud.com>", "Paul Meng <me@paulme.ng>"]
 categories = ["text-processing"]
 description = "The Jieba Chinese Word Segmentation Implemented in Rust"
@@ -56,7 +56,7 @@ codspeed-criterion-compat = "3.0.4"
 derive_builder = "0.20.0"
 fxhash = "0.2.1"
 include-flate = "0.3.0"
-jieba-macros = { version = "0.7.1", path = "jieba-macros" }
+jieba-macros = { version = "0.8.0", path = "jieba-macros" }
 ordered-float = "5.0"
 phf = "0.12.1"
 phf_codegen = "0.12.1"
