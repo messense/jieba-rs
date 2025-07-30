@@ -1001,7 +1001,7 @@ mod tests {
 
     #[test]
     fn test_cut_weicheng() {
-        static WEICHENG_TXT: &str = include_str!("../examples/weicheng/src/weicheng.txt");
+        static WEICHENG_TXT: &str = include_str!("../../examples/weicheng/src/weicheng.txt");
         let jieba = Jieba::new();
         for line in WEICHENG_TXT.split('\n') {
             let _ = jieba.cut(line, true);
