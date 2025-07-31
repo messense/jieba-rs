@@ -402,8 +402,7 @@ impl Jieba {
                         .map(|x| {
                             x.parse::<usize>().map_err(|e| {
                                 Error::InvalidDictEntry(format!(
-                                    "line {} `{}` frequency {} is not a valid integer: {}",
-                                    line_no, buf, x, e
+                                    "line {line_no} `{buf}` frequency {x} is not a valid integer: {e}"
                                 ))
                             })
                         })
@@ -1016,7 +1015,7 @@ mod tests {
 
         let words = jieba.cut_for_search("小明硕士毕业于中国科学院计算所，后在日本京都大学深造", true);
 
-        // The python implementation silently filtered "，". but we includes it here in the output
+        // The python implementation silently filtered "，". but we include it here in the output
         // to let the library user to decide their own filtering strategy
         assert_eq!(
             words,

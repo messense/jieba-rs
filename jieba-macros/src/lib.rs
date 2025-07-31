@@ -33,7 +33,7 @@ pub fn generate_hmm_data(_input: TokenStream) -> TokenStream {
     // Emission probabilities
     for (i, line) in lines.filter(|x| !x.starts_with('#')).enumerate() {
         output.push_str("#[allow(clippy::style)]\n");
-        output.push_str(&format!("pub static EMIT_PROB_{}: phf::Map<&'static str, f64> = ", i));
+        output.push_str(&format!("pub static EMIT_PROB_{i}: phf::Map<&'static str, f64> = "));
 
         let mut map = phf_codegen::Map::new();
         for word_prob in line.split(',') {

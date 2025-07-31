@@ -17,13 +17,12 @@ all-features = true
 [features]
 default = ["default-dict"]
 default-dict = []
-tfidf = ["dep:ordered-float", "dep:derive_builder"]
-textrank = ["dep:ordered-float", "dep:derive_builder"]
+tfidf = ["dep:ordered-float"]
+textrank = ["dep:ordered-float"]
 
 [dependencies]
 jieba-macros = { workspace = true }
 cedarwood = { workspace = true }
-derive_builder = { workspace = true, optional = true }
 fxhash = { workspace = true }
 include-flate = { workspace = true }
 ordered-float = { workspace = true, optional = true }
