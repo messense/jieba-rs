@@ -1,11 +1,12 @@
 [package]
 name = "weicheng"
+publish = false
 version = "0.1.0"
-authors = ["messense <messense@icloud.com>"]
+
 edition.workspace = true
 
 [dependencies]
-jieba-rs = { path = "../.." }
+jieba-rs = { workspace = true }
 
 [target.'cfg(unix)'.dependencies]
 tikv-jemallocator = "0.6.0"

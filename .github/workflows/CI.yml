@@ -31,15 +31,15 @@ jobs:
       - name: Cache cargo build
         uses: Swatinem/rust-cache@v2
       - name: Check build with --no-default-features
-        run: cargo build --no-default-features
+        run: cargo build --workspace --no-default-features
       - name: Check build with default features
-        run: cargo build
+        run: cargo build --workspace
       - name: Check build with tfidf feature
-        run: cargo build --features tfidf
+        run: cargo build --workspace --features tfidf
       - name: Check build with textrank feature
-        run: cargo build --features textrank
+        run: cargo build --workspace --features textrank
       - name: Test
-        run: cargo test --all-features --all --benches
+        run: cargo test --workspace --all-features --all --benches
 
   codecov:
     name: Code Coverage

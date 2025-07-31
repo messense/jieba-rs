@@ -1,11 +1,17 @@
 [package]
 name = "jieba-capi"
 version = "0.1.0"
-authors = ["messense <messense@icloud.com>"]
+
 edition.workspace = true
+license.workspace = true
+readme.workspace = true
+repository.workspace = true
 
 [dependencies]
-jieba-rs = { version = "0.8.0", path = "../", features = ["textrank", "tfidf"] }
+jieba-rs = { version = "0.8.0", workspace = true, features = [
+    "textrank",
+    "tfidf",
+] }
 c_fixed_string = { workspace = true }
 
 [lib]
