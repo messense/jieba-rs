@@ -68,7 +68,7 @@ impl StateDiagram {
     }
 }
 
-/// Text rank keywords extraction.
+/// Text rank keywords' extraction.
 ///
 /// Requires `textrank` feature to be enabled.
 #[derive(Debug)]
@@ -84,15 +84,15 @@ impl TextRank {
     ///
     /// New instance with custom stop words. Also uses hmm for unknown words
     /// during segmentation.
-    /// ```
-    ///    use std::collections::BTreeSet;
-    ///    use jieba_rs::{TextRank, KeywordExtractConfig};
     ///
-    ///    let stop_words : BTreeSet<String> =
-    ///        BTreeSet::from(["a", "the", "of"].map(|s| s.to_string()));
-    ///    TextRank::new(
-    ///        5,
-    ///        KeywordExtractConfig::default());
+    /// ```
+    /// use std::collections::BTreeSet;
+    /// use jieba_rs::{TextRank, KeywordExtractConfig};
+    ///
+    /// let stop_words : BTreeSet<String> =
+    ///     BTreeSet::from(["a", "the", "of"].map(|s| s.to_string()));
+    ///
+    /// TextRank::new(5, KeywordExtractConfig::default());
     /// ```
     pub fn new(span: usize, config: KeywordExtractConfig) -> Self {
         TextRank { span, config }
@@ -102,7 +102,7 @@ impl TextRank {
 impl Default for TextRank {
     /// Creates TextRank with 5 Unicode Scalar Value spans
     fn default() -> Self {
-        TextRank::new(5, KeywordExtractConfigBuilder::default().build().unwrap())
+        TextRank::new(5, KeywordExtractConfigBuilder::default().build())
     }
 }
 
@@ -115,31 +115,31 @@ impl KeywordExtract for TextRank {
     /// # Examples
     ///
     /// ```
-    ///    use jieba_rs::{Jieba, KeywordExtract, TextRank};
+    /// use jieba_rs::{Jieba, KeywordExtract, TextRank};
     ///
-    ///    let jieba = Jieba::new();
-    ///    let keyword_extractor = TextRank::default();
-    ///    let mut top_k = keyword_extractor.extract_keywords(
-    ///        &jieba,
-    ///        "此外，公司拟对全资子公司吉林欧亚置业有限公司增资4.3亿元，增资后，吉林欧亚置业注册资本由7000万元增加到5亿元。吉林欧亚置业主要经营范围为房地产开发及百货零售等业务。目前在建吉林欧亚城市商业综合体项目。2013年，实现营业收入0万元，实现净利润-139.13万元。",
-    ///        6,
-    ///        vec![String::from("ns"), String::from("n"), String::from("vn"), String::from("v")],
-    ///    );
-    ///    assert_eq!(
-    ///        top_k.iter().map(|x| &x.keyword).collect::<Vec<&String>>(),
-    ///        vec!["吉林", "欧亚", "置业", "实现", "收入", "子公司"]
-    ///    );
+    /// let jieba = Jieba::new();
+    /// let keyword_extractor = TextRank::default();
+    /// let mut top_k = keyword_extractor.extract_keywords(
+    ///     &jieba,
+    ///     "此外，公司拟对全资子公司吉林欧亚置业有限公司增资4.3亿元，增资后，吉林欧亚置业注册资本由7000万元增加到5亿元。吉林欧亚置业主要经营范围为房地产开发及百货零售等业务。目前在建吉林欧亚城市商业综合体项目。2013年，实现营业收入0万元，实现净利润-139.13万元。",
+    ///     6,
+    ///     vec![String::from("ns"), String::from("n"), String::from("vn"), String::from("v")],
+    /// );
+    /// assert_eq!(
+    ///     top_k.iter().map(|x| &x.keyword).collect::<Vec<&String>>(),
+    ///     vec!["吉林", "欧亚", "置业", "实现", "收入", "子公司"],
+    /// );
     ///
-    ///    top_k = keyword_extractor.extract_keywords(
-    ///        &jieba,
-    ///        "It is nice weather in New York City. and今天纽约的天气真好啊，and京华大酒店的张尧经理吃了一只北京烤鸭。and后天纽约的天气不好，and昨天纽约的天气也不好，and北京烤鸭真好吃",
-    ///        3,
-    ///        vec![],
-    ///    );
-    ///    assert_eq!(
-    ///        top_k.iter().map(|x| &x.keyword).collect::<Vec<&String>>(),
-    ///        vec!["纽约", "天气", "不好"]
-    ///    );
+    /// top_k = keyword_extractor.extract_keywords(
+    ///     &jieba,
+    ///     "It is nice weather in New York City. and今天纽约的天气真好啊，and京华大酒店的张尧经理吃了一只北京烤鸭。and后天纽约的天气不好，and昨天纽约的天气也不好，and北京烤鸭真好吃",
+    ///     3,
+    ///     vec![],
+    /// );
+    /// assert_eq!(
+    ///     top_k.iter().map(|x| &x.keyword).collect::<Vec<&String>>(),
+    ///     vec!["纽约", "天气", "不好"],
+    /// );
     /// ```
     fn extract_keywords(&self, jieba: &Jieba, sentence: &str, top_k: usize, allowed_pos: Vec<String>) -> Vec<Keyword> {
         let tags = jieba.tag(sentence, self.config.use_hmm());
@@ -169,7 +169,7 @@ impl KeywordExtract for TextRank {
                 continue;
             }
 
-            if !self.config.filter(t.word) {
+            if !self.config.is_keyword(t.word) {
                 continue;
             }
 
@@ -182,7 +182,7 @@ impl KeywordExtract for TextRank {
                     continue;
                 }
 
-                if !self.config.filter(tags[j].word) {
+                if !self.config.is_keyword(tags[j].word) {
                     continue;
                 }
 
@@ -251,6 +251,7 @@ impl PartialOrd for HeapNode {
 #[cfg(test)]
 mod tests {
     use super::*;
+
     #[test]
     fn test_init_state_diagram() {
         let diagram = StateDiagram::new(10);

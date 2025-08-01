@@ -64,14 +64,14 @@ fn criterion_benchmark(c: &mut Criterion) {
     group.bench_function("single_thread", |b| {
         b.iter(|| {
             for _ in 0..repeat {
-                let _words = JIEBA.cut(black_box(&SENTENCE), true);
+                let _words = JIEBA.cut(black_box(SENTENCE), true);
             }
         })
     });
     group.bench_function("multi_thread", |b| {
         b.iter(|| {
             (0..repeat).into_par_iter().for_each(|_| {
-                let _words = JIEBA.cut(black_box(&SENTENCE), true);
+                let _words = JIEBA.cut(black_box(SENTENCE), true);
             });
         })
     });

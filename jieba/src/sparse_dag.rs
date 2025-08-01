@@ -15,10 +15,6 @@ pub struct EdgeIter<'a> {
 impl Iterator for EdgeIter<'_> {
     type Item = usize;
 
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        (0, Some(self.dag.size_hint_for_iterator))
-    }
-
     fn next(&mut self) -> Option<Self::Item> {
         if self.dag.array[self.cursor] == 0 {
             self.cursor += 1;
@@ -28,6 +24,10 @@ impl Iterator for EdgeIter<'_> {
             self.cursor += 1;
             Some(v)
         }
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (0, Some(self.dag.size_hint_for_iterator))
     }
 }
 
@@ -39,7 +39,7 @@ impl StaticSparseDAG {
         const MULTIPLIER: usize = 4; // Reduced from 5 to 4
         const MIN_CAPACITY: usize = 32; // Minimum useful capacity
 
-        let capacity = std::cmp::max(std::cmp::min(hint * MULTIPLIER, MAX_CAPACITY), MIN_CAPACITY);
+        let capacity = (hint * MULTIPLIER).clamp(MIN_CAPACITY, MAX_CAPACITY);
 
         StaticSparseDAG {
             array: Vec::with_capacity(capacity),
@@ -89,10 +89,10 @@ mod tests {
     fn test_static_sparse_dag() {
         let mut dag = StaticSparseDAG::with_size_hint(5);
         let mut ans: Vec<Vec<usize>> = vec![Vec::new(); 5];
-        for i in 0..=3 {
+        for (i, item) in ans.iter_mut().enumerate().take(4) {
             dag.start(i);
             for j in (i + 1)..=4 {
-                ans[i].push(j);
+                item.push(j);
                 dag.insert(j);
             }
 
@@ -101,9 +101,9 @@ mod tests {
 
         assert_eq!(dag.size_hint_for_iterator, 4);
 
-        for i in 0..=3 {
-            let edges: Vec<usize> = dag.iter_edges(i).collect();
-            assert_eq!(ans[i], edges);
+        for (i, item) in ans.iter().enumerate().take(4) {
+            let edges = dag.iter_edges(i).collect::<Vec<_>>();
+            assert_eq!(item, &edges);
         }
     }
 }

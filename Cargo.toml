@@ -17,7 +17,6 @@ jieba-macros = { version = "0.8.0", path = "jieba-macros" }
 c_fixed_string = { version = "0.2" }
 cedarwood = { version = "0.4" }
 codspeed-criterion-compat = { version = "3.0.4" }
-derive_builder = { version = "0.20.0" }
 fxhash = { version = "0.2.1" }
 include-flate = { version = "0.3.0" }
 ordered-float = { version = "5.0" }
