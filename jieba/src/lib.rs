@@ -71,9 +71,6 @@
 //! ```
 //!
 
-#[cfg(feature = "default-dict")]
-use include_flate::flate;
-
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::io::BufRead;
@@ -98,7 +95,7 @@ mod keywords;
 mod sparse_dag;
 
 #[cfg(feature = "default-dict")]
-flate!(static DEFAULT_DICT: str from "src/data/dict.txt");
+include_flate::flate!(static DEFAULT_DICT: str from "src/data/dict.txt");
 
 use sparse_dag::StaticSparseDAG;
 
