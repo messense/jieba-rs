@@ -71,6 +71,7 @@
 //! ```
 //!
 
+#[cfg(feature = "default-dict")]
 use include_flate::flate;
 
 use std::cmp::Ordering;
