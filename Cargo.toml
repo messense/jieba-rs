@@ -16,12 +16,12 @@ jieba-macros = { version = "0.8.0", path = "jieba-macros" }
 # Crates.io dependencies
 c_fixed_string = { version = "0.2" }
 cedarwood = { version = "0.4" }
-codspeed-criterion-compat = { version = "3.0.4" }
+codspeed-criterion-compat = { version = "3.0.5" }
 fxhash = { version = "0.2.1" }
-include-flate = { version = "0.3.0" }
+include-flate = { version = "0.3.1" }
 ordered-float = { version = "5.0" }
-phf = { version = "0.12.1" }
-phf_codegen = { version = "0.12.1" }
-rayon = { version = "1.10" }
-regex = { version = "1.11.1" }
-wasm-bindgen-test = { version = "0.3.0" }
+phf = { version = "0.13.1" }
+phf_codegen = { version = "0.13.1" }
+rayon = { version = "1.11" }
+regex = { version = "1.11.2" }
+wasm-bindgen-test = { version = "0.3.50" }
