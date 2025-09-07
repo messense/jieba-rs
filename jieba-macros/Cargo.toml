@@ -1,6 +1,6 @@
 [package]
 name = "jieba-macros"
-version = "0.8.0"
+version = "0.8.1"
 categories = ["text-processing"]
 description = "jieba-rs proc-macro"
 keywords = ["nlp", "chinese", "segmenation"]
