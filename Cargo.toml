@@ -30,7 +30,7 @@ required-features = ["tfidf", "textrank"]
 jieba-macros = { workspace = true }
 cedarwood = { workspace = true }
 derive_builder = { workspace = true, optional = true }
-fxhash = { workspace = true }
+rustc-hash = { workspace = true }
 include-flate = { workspace = true }
 ordered-float = { workspace = true, optional = true }
 phf = { workspace = true }
@@ -54,7 +54,7 @@ c_fixed_string = "0.2.0"
 cedarwood = "0.4"
 codspeed-criterion-compat = "3.0.4"
 derive_builder = "0.20.0"
-fxhash = "0.2.1"
+rustc-hash = { version = "2.1" }
 include-flate = "0.3.0"
 jieba-macros = { version = "0.8.0", path = "jieba-macros" }
 ordered-float = "5.0"
