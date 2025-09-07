@@ -150,7 +150,7 @@ impl KeywordExtract for TextRank {
         }
 
         let mut word2id: HashMap<String, usize> =
-            HashMap::with_capacity_and_hasher(tags.len() / 2, fxhash::FxBuildHasher::default());
+            HashMap::with_capacity_and_hasher(tags.len() / 2, rustc_hash::FxBuildHasher);
         let mut unique_words = Vec::with_capacity(tags.len() / 2);
         for t in &tags {
             if !allowed_pos_set.is_empty() && !allowed_pos_set.contains(t.tag) {
