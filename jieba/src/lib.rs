@@ -73,6 +73,7 @@
 
 use std::cmp::Ordering;
 use std::collections::HashMap;
+use std::fmt;
 use std::io::BufRead;
 
 use cedarwood::Cedar;
@@ -221,11 +222,20 @@ impl Record {
 }
 
 /// Jieba segmentation
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct Jieba {
     records: Vec<Record>,
     cedar: Cedar,
     total: usize,
+}
+
+impl fmt::Debug for Jieba {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Jieba")
+            .field("records_len", &self.records.len())
+            .field("total_freq", &self.total)
+            .finish()
+    }
 }
 
 #[cfg(feature = "default-dict")]
