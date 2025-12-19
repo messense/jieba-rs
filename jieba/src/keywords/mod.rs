@@ -1,14 +1,13 @@
 use crate::Jieba;
 
 use std::collections::BTreeSet;
-use std::sync::LazyLock;
 
 #[cfg(feature = "textrank")]
 pub mod textrank;
 #[cfg(feature = "tfidf")]
 pub mod tfidf;
 
-pub static DEFAULT_STOP_WORDS: LazyLock<BTreeSet<String>> = LazyLock::new(|| {
+pub fn default_stop_words() -> BTreeSet<String> {
     BTreeSet::from_iter(
         [
             "the", "of", "is", "and", "to", "in", "that", "we", "for", "an", "are", "by", "be", "as", "on", "with",
@@ -17,7 +16,7 @@ pub static DEFAULT_STOP_WORDS: LazyLock<BTreeSet<String>> = LazyLock::new(|| {
         .into_iter()
         .map(ToString::to_string),
     )
-});
+}
 
 /// Keyword with weight.
 #[derive(Debug, Clone, PartialEq)]
@@ -107,7 +106,7 @@ pub struct KeywordExtractConfigBuilder {
 impl Default for KeywordExtractConfigBuilder {
     fn default() -> Self {
         KeywordExtractConfigBuilder {
-            stop_words: DEFAULT_STOP_WORDS.clone(),
+            stop_words: default_stop_words(),
             min_keyword_length: 2,
             use_hmm: false,
         }
