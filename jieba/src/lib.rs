@@ -211,12 +211,12 @@ pub struct Tag<'a> {
 #[derive(Debug, Clone)]
 struct Record {
     freq: usize,
-    tag: String,
+    tag: Box<str>,
 }
 
 impl Record {
     #[inline(always)]
-    fn new(freq: usize, tag: String) -> Self {
+    fn new(freq: usize, tag: Box<str>) -> Self {
         Self { freq, tag }
     }
 }
@@ -349,7 +349,7 @@ impl Jieba {
             }
             None => {
                 let word_id = self.records.len() as i32;
-                self.records.push(Record::new(freq, String::from(tag)));
+                self.records.push(Record::new(freq, tag.into()));
 
                 self.cedar.update(word, word_id);
                 self.total += freq;
@@ -423,7 +423,7 @@ impl Jieba {
                         }
                         None => {
                             let word_id = self.records.len() as i32;
-                            self.records.push(Record::new(freq, String::from(tag)));
+                            self.records.push(Record::new(freq, tag.into()));
                             self.cedar.update(word, word_id);
                         }
                     };
