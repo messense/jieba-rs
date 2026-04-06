@@ -149,7 +149,7 @@ impl KeywordExtract for TextRank {
             allowed_pos_set.insert(s);
         }
 
-        let mut word2id: HashMap<String, usize> =
+        let mut word2id: HashMap<&str, usize> =
             HashMap::with_capacity_and_hasher(tags.len() / 2, rustc_hash::FxBuildHasher);
         let mut unique_words = Vec::with_capacity(tags.len() / 2);
         for t in &tags {
@@ -158,8 +158,8 @@ impl KeywordExtract for TextRank {
             }
 
             if !word2id.contains_key(t.word) {
-                unique_words.push(String::from(t.word));
-                word2id.insert(String::from(t.word), unique_words.len() - 1);
+                unique_words.push(t.word);
+                word2id.insert(&t.word, unique_words.len() - 1);
             }
         }
 
@@ -216,7 +216,7 @@ impl KeywordExtract for TextRank {
         for _ in 0..top_k {
             if let Some(w) = heap.pop() {
                 res.push(Keyword {
-                    keyword: unique_words[w.word_id].clone(),
+                    keyword: unique_words[w.word_id].to_string(),
                     weight: w.rank.into_inner(),
                 });
             }
