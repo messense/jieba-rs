@@ -215,7 +215,7 @@ impl KeywordExtract for TfIdf {
             allowed_pos_set.insert(s);
         }
 
-        let mut term_freq: HashMap<String, u64> = HashMap::default();
+        let mut term_freq: HashMap<&str, u64> = HashMap::default();
         for t in &tags {
             if !allowed_pos_set.is_empty() && !allowed_pos_set.contains(t.tag) {
                 continue;
@@ -225,14 +225,13 @@ impl KeywordExtract for TfIdf {
                 continue;
             }
 
-            let entry = term_freq.entry(String::from(t.word)).or_insert(0);
-            *entry += 1;
+            *term_freq.entry(t.word).or_insert(0) += 1;
         }
 
         let total: u64 = term_freq.values().sum();
         let mut heap = BinaryHeap::new();
         for (cnt, (k, tf)) in term_freq.iter().enumerate() {
-            let idf = self.idf_dict.get(k).unwrap_or(&self.median_idf);
+            let idf = self.idf_dict.get(*k).unwrap_or(&self.median_idf);
             let node = HeapNode {
                 tfidf: OrderedFloat(*tf as f64 * idf / total as f64),
                 word: k,
