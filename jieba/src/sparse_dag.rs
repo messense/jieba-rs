@@ -1,10 +1,26 @@
-use crate::FxHashMap as HashMap;
-
 pub(crate) struct StaticSparseDAG {
-    array: Vec<usize>,
-    start_pos: HashMap<usize, usize>,
+    array: Vec<u64>,
+    /// Maps byte offset → index into `array`. Uses `usize::MAX` as sentinel for "no entry".
+    start_pos: Vec<usize>,
     size_hint_for_iterator: usize,
     curr_insertion_len: usize,
+}
+
+const NO_ENTRY: usize = usize::MAX;
+
+/// Encodes (byte_end + 1, word_id) into a single u64.
+/// byte_end is stored as byte_end + 1 so that 0 can serve as the sentinel.
+/// word_id uses i32::MIN as "no match" sentinel.
+#[inline(always)]
+fn encode_edge(byte_end: usize, word_id: i32) -> u64 {
+    ((byte_end as u64 + 1) << 32) | (word_id as u32 as u64)
+}
+
+#[inline(always)]
+fn decode_edge(val: u64) -> (usize, i32) {
+    let byte_end = (val >> 32) as usize - 1;
+    let word_id = val as u32 as i32;
+    (byte_end, word_id)
 }
 
 pub struct EdgeIter<'a> {
@@ -13,16 +29,16 @@ pub struct EdgeIter<'a> {
 }
 
 impl Iterator for EdgeIter<'_> {
-    type Item = usize;
+    type Item = (usize, i32);
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.dag.array[self.cursor] == 0 {
+        let val = self.dag.array[self.cursor];
+        if val == 0 {
             self.cursor += 1;
             None
         } else {
-            let v = self.dag.array[self.cursor] - 1;
             self.cursor += 1;
-            Some(v)
+            Some(decode_edge(val))
         }
     }
 
@@ -30,6 +46,9 @@ impl Iterator for EdgeIter<'_> {
         (0, Some(self.dag.size_hint_for_iterator))
     }
 }
+
+/// word_id sentinel meaning "no dictionary match"
+pub(crate) const NO_MATCH: i32 = i32::MIN;
 
 impl StaticSparseDAG {
     pub(crate) fn with_size_hint(hint: usize) -> Self {
@@ -43,7 +62,7 @@ impl StaticSparseDAG {
 
         StaticSparseDAG {
             array: Vec::with_capacity(capacity),
-            start_pos: HashMap::default(),
+            start_pos: vec![NO_ENTRY; hint + 1],
             size_hint_for_iterator: 0,
             curr_insertion_len: 0,
         }
@@ -53,13 +72,16 @@ impl StaticSparseDAG {
     pub(crate) fn start(&mut self, from: usize) {
         let idx = self.array.len();
         self.curr_insertion_len = 0;
-        self.start_pos.insert(from, idx);
+        if from >= self.start_pos.len() {
+            self.start_pos.resize(from + 1, NO_ENTRY);
+        }
+        self.start_pos[from] = idx;
     }
 
     #[inline]
-    pub(crate) fn insert(&mut self, to: usize) {
+    pub(crate) fn insert(&mut self, to: usize, word_id: i32) {
         self.curr_insertion_len += 1;
-        self.array.push(to + 1);
+        self.array.push(encode_edge(to, word_id));
     }
 
     #[inline]
@@ -70,14 +92,15 @@ impl StaticSparseDAG {
 
     #[inline]
     pub(crate) fn iter_edges(&self, from: usize) -> EdgeIter<'_> {
-        let cursor = self.start_pos.get(&from).unwrap().to_owned();
+        let cursor = self.start_pos[from];
+        debug_assert!(cursor != NO_ENTRY);
 
         EdgeIter { dag: self, cursor }
     }
 
     pub(crate) fn clear(&mut self) {
         self.array.clear();
-        self.start_pos.clear();
+        self.start_pos.fill(NO_ENTRY);
     }
 }
 
@@ -93,7 +116,7 @@ mod tests {
             dag.start(i);
             for j in (i + 1)..=4 {
                 item.push(j);
-                dag.insert(j);
+                dag.insert(j, j as i32);
             }
 
             dag.commit()
@@ -102,7 +125,7 @@ mod tests {
         assert_eq!(dag.size_hint_for_iterator, 4);
 
         for (i, item) in ans.iter().enumerate().take(4) {
-            let edges = dag.iter_edges(i).collect::<Vec<_>>();
+            let edges: Vec<usize> = dag.iter_edges(i).map(|(to, _)| to).collect();
             assert_eq!(item, &edges);
         }
     }

@@ -466,10 +466,8 @@ impl Jieba {
         for byte_start in curr {
             let pair = dag
                 .iter_edges(byte_start)
-                .map(|byte_end| {
-                    let wfrag = &sentence[byte_start..byte_end];
-
-                    let freq = if let Some((word_id, _, _)) = self.cedar.exact_match_search(wfrag) {
+                .map(|(byte_end, word_id)| {
+                    let freq = if word_id != sparse_dag::NO_MATCH {
                         self.records[word_id as usize].freq
                     } else {
                         1
@@ -492,12 +490,12 @@ impl Jieba {
     }
 
     fn dag(&self, sentence: &str, dag: &mut StaticSparseDAG) {
-        for (byte_start, _) in sentence.char_indices().peekable() {
+        for (byte_start, _) in sentence.char_indices() {
             dag.start(byte_start);
             let haystack = &sentence[byte_start..];
 
-            for (_, end_index) in self.cedar.common_prefix_iter(haystack) {
-                dag.insert(end_index + byte_start + 1);
+            for (word_id, end_index) in self.cedar.common_prefix_iter(haystack) {
+                dag.insert(end_index + byte_start + 1, word_id);
             }
 
             dag.commit();
@@ -511,7 +509,7 @@ impl Jieba {
 
         let curr = sentence.char_indices().map(|x| x.0);
         for byte_start in curr {
-            for byte_end in dag.iter_edges(byte_start) {
+            for (byte_end, _) in dag.iter_edges(byte_start) {
                 let word = if byte_end == str_len {
                     &sentence[byte_start..]
                 } else {
@@ -539,7 +537,7 @@ impl Jieba {
             let y = route[x].1;
             let l_str = &sentence[x..y];
 
-            if l_str.chars().count() == 1 && l_str.chars().all(|ch| ch.is_ascii_alphanumeric()) {
+            if l_str.chars().nth(1).is_none() && l_str.as_bytes()[0].is_ascii_alphanumeric() {
                 if left.is_none() {
                     left = Some(x);
                 }
@@ -581,7 +579,7 @@ impl Jieba {
         while x < sentence.len() {
             let y = route[x].1;
 
-            if sentence[x..y].chars().count() == 1 {
+            if sentence[x..y].chars().nth(1).is_none() {
                 if left.is_none() {
                     left = Some(x);
                 }
@@ -589,7 +587,7 @@ impl Jieba {
                 if let Some(byte_start) = left {
                     let byte_end = x;
                     let word = &sentence[byte_start..byte_end];
-                    if word.chars().count() == 1 {
+                    if word.chars().nth(1).is_none() {
                         words.push(word);
                     } else if self.cedar.exact_match_search(word).is_none() {
                         hmm::cut_with_allocated_memory(word, words, hmm_context);
@@ -614,7 +612,7 @@ impl Jieba {
         if let Some(byte_start) = left {
             let word = &sentence[byte_start..];
 
-            if word.chars().count() == 1 {
+            if word.chars().nth(1).is_none() {
                 words.push(word);
             } else if self.cedar.exact_match_search(word).is_none() {
                 hmm::cut(word, words);
