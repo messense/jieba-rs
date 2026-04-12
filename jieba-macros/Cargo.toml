@@ -1,6 +1,6 @@
 [package]
 name = "jieba-macros"
-version = "0.8.0"
+version.workspace = true
 
 categories = ["text-processing"]
 description = "Collections of proc-macro for jieba-rs"

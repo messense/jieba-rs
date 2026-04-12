@@ -1,6 +1,6 @@
 [package]
 name = "jieba-rs"
-version = "0.8.0"
+version.workspace = true
 
 categories = ["text-processing"]
 description = "Jieba Chinese Word Segmentation in Rust"
