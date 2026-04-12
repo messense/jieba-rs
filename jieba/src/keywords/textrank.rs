@@ -159,7 +159,7 @@ impl KeywordExtract for TextRank {
 
             if !word2id.contains_key(t.word) {
                 unique_words.push(t.word);
-                word2id.insert(&t.word, unique_words.len() - 1);
+                word2id.insert(t.word, unique_words.len() - 1);
             }
         }
 

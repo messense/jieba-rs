@@ -67,7 +67,10 @@ fn viterbi(sentence: &str, hmm_context: &mut HmmContext) {
     let states = [State::Begin, State::Middle, State::End, State::Single];
     #[allow(non_snake_case)]
     let R = states.len();
-    let C = sentence.chars().count();
+
+    // Collect char byte offsets once, derive C from the length
+    let char_offsets: Vec<usize> = sentence.char_indices().map(|x| x.0).collect();
+    let C = char_offsets.len();
     assert!(C > 1);
 
     // TODO: Can code just do fill() with the default instead of clear() and resize?
@@ -83,7 +86,7 @@ fn viterbi(sentence: &str, hmm_context: &mut HmmContext) {
         hmm_context.best_path.resize(C, State::Begin);
     }
 
-    let mut curr = sentence.char_indices().map(|x| x.0).peekable();
+    let mut curr = char_offsets.iter().copied().peekable();
     let x1 = curr.next().unwrap();
     let x2 = *curr.peek().unwrap();
     for y in &states {
@@ -188,8 +191,8 @@ pub(crate) fn cut_with_allocated_memory<'a>(sentence: &'a str, words: &mut Vec<&
                 if block.is_empty() {
                     continue;
                 }
-                if re_han.is_match(block) {
-                    if block.chars().count() > 1 {
+                if state.is_matched() {
+                    if block.chars().nth(1).is_some() {
                         cut_internal(block, words, hmm_context);
                     } else {
                         words.push(block);

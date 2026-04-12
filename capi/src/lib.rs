@@ -138,8 +138,12 @@ unsafe fn params_unwrap(cjieba_ref: &*mut CJieba, s: *const c_char, len: usize) 
     (jieba, c_str)
 }
 
-unsafe fn params_unwrap_mut(cjieba_ref: &*mut CJieba, s: *const c_char, len: usize) -> (&mut Jieba, &CFixedStr) {
-    let jieba = unsafe { &mut (*(*cjieba_ref)).jieba };
+unsafe fn params_unwrap_mut<'a>(
+    cjieba_ref: *mut CJieba,
+    s: *const c_char,
+    len: usize,
+) -> (&'a mut Jieba, &'a CFixedStr) {
+    let jieba = unsafe { &mut (*cjieba_ref).jieba };
     let c_str = unsafe { CFixedStr::from_ptr(s, len) };
     (jieba, c_str)
 }
@@ -461,7 +465,7 @@ pub unsafe extern "C" fn jieba_tags_free(c_tags: *mut CJiebaTags) {
 /// cjieba must be valid object from `jieba_new()`. `word` must be `len` or larger.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn jieba_add_word(cjieba: *mut CJieba, word: *const c_char, len: usize) -> usize {
-    let (jieba, c_str) = unsafe { params_unwrap_mut(&cjieba, word, len) };
+    let (jieba, c_str) = unsafe { params_unwrap_mut(cjieba, word, len) };
     // FIXME: remove allocation
     let s = String::from_utf8_lossy(c_str.as_bytes_full());
     jieba.add_word(&s, None, None)
