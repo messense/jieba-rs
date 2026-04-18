@@ -1,8 +1,11 @@
 use std::cmp::Ordering;
+use std::io::BufRead;
 
 use regex::Regex;
 
+use crate::FxHashMap;
 use crate::SplitMatches;
+use crate::errors::Error;
 use jieba_macros::generate_hmm_data;
 
 thread_local! {
@@ -54,6 +57,32 @@ generate_hmm_data!();
 
 const MIN_FLOAT: f64 = -3.14e100;
 
+pub(crate) trait HmmParams {
+    fn initial_prob(&self, state: usize) -> f64;
+    fn trans_prob(&self, from: usize, to: usize) -> f64;
+    fn emit_prob(&self, state: usize, word: &str) -> f64;
+}
+
+/// The compile-time embedded HMM parameters.
+pub(crate) struct BuiltinHmm;
+
+impl HmmParams for BuiltinHmm {
+    #[inline]
+    fn initial_prob(&self, state: usize) -> f64 {
+        INITIAL_PROBS[state]
+    }
+
+    #[inline]
+    fn trans_prob(&self, from: usize, to: usize) -> f64 {
+        TRANS_PROBS[from].get(to).cloned().unwrap_or(MIN_FLOAT)
+    }
+
+    #[inline]
+    fn emit_prob(&self, state: usize, word: &str) -> f64 {
+        EMIT_PROBS[state].get(word).cloned().unwrap_or(MIN_FLOAT)
+    }
+}
+
 #[derive(Default)]
 pub(crate) struct HmmContext {
     v: Vec<f64>,
@@ -62,7 +91,7 @@ pub(crate) struct HmmContext {
 }
 
 #[allow(non_snake_case)]
-fn viterbi(sentence: &str, hmm_context: &mut HmmContext) {
+fn viterbi(sentence: &str, params: &impl HmmParams, hmm_context: &mut HmmContext) {
     let str_len = sentence.len();
     let states = [State::Begin, State::Middle, State::End, State::Single];
     #[allow(non_snake_case)]
@@ -91,7 +120,7 @@ fn viterbi(sentence: &str, hmm_context: &mut HmmContext) {
     let x2 = *curr.peek().unwrap();
     for y in &states {
         let first_word = &sentence[x1..x2];
-        let prob = INITIAL_PROBS[*y as usize] + EMIT_PROBS[*y as usize].get(first_word).cloned().unwrap_or(MIN_FLOAT);
+        let prob = params.initial_prob(*y as usize) + params.emit_prob(*y as usize, first_word);
         hmm_context.v[*y as usize] = prob;
     }
 
@@ -100,13 +129,13 @@ fn viterbi(sentence: &str, hmm_context: &mut HmmContext) {
         for y in &states {
             let byte_end = *curr.peek().unwrap_or(&str_len);
             let word = &sentence[byte_start..byte_end];
-            let em_prob = EMIT_PROBS[*y as usize].get(word).cloned().unwrap_or(MIN_FLOAT);
+            let em_prob = params.emit_prob(*y as usize, word);
             let (prob, state) = ALLOWED_PREV_STATUS[*y as usize]
                 .iter()
                 .map(|y0| {
                     (
                         hmm_context.v[(t - 1) * R + (*y0 as usize)]
-                            + TRANS_PROBS[*y0 as usize].get(*y as usize).cloned().unwrap_or(MIN_FLOAT)
+                            + params.trans_prob(*y0 as usize, *y as usize)
                             + em_prob,
                         *y0,
                     )
@@ -143,9 +172,14 @@ fn viterbi(sentence: &str, hmm_context: &mut HmmContext) {
 }
 
 #[allow(non_snake_case)]
-pub(crate) fn cut_internal<'a>(sentence: &'a str, words: &mut Vec<&'a str>, hmm_context: &mut HmmContext) {
+fn cut_internal<'a>(
+    sentence: &'a str,
+    words: &mut Vec<&'a str>,
+    params: &impl HmmParams,
+    hmm_context: &mut HmmContext,
+) {
     let str_len = sentence.len();
-    viterbi(sentence, hmm_context);
+    viterbi(sentence, params, hmm_context);
     let mut begin = 0;
     let mut next_byte_offset = 0;
     let mut i = 0;
@@ -182,7 +216,12 @@ pub(crate) fn cut_internal<'a>(sentence: &'a str, words: &mut Vec<&'a str>, hmm_
 }
 
 #[allow(non_snake_case)]
-pub(crate) fn cut_with_allocated_memory<'a>(sentence: &'a str, words: &mut Vec<&'a str>, hmm_context: &mut HmmContext) {
+pub(crate) fn cut_with_allocated_memory<'a>(
+    sentence: &'a str,
+    words: &mut Vec<&'a str>,
+    params: &impl HmmParams,
+    hmm_context: &mut HmmContext,
+) {
     RE_HAN.with(|re_han| {
         RE_SKIP.with(|re_skip| {
             let splitter = SplitMatches::new(re_han, sentence);
@@ -193,7 +232,7 @@ pub(crate) fn cut_with_allocated_memory<'a>(sentence: &'a str, words: &mut Vec<&
                 }
                 if state.is_matched() {
                     if block.chars().nth(1).is_some() {
-                        cut_internal(block, words, hmm_context);
+                        cut_internal(block, words, params, hmm_context);
                     } else {
                         words.push(block);
                     }
@@ -212,17 +251,130 @@ pub(crate) fn cut_with_allocated_memory<'a>(sentence: &'a str, words: &mut Vec<&
     })
 }
 
-#[allow(non_snake_case)]
-pub fn cut<'a>(sentence: &'a str, words: &mut Vec<&'a str>) {
-    let mut hmm_context = HmmContext::default();
+/// A runtime-loadable HMM model for custom segmentation.
+///
+/// This allows loading HMM parameters trained with `scripts/train_hmm.py`
+/// instead of using the compile-time embedded model.
+#[derive(Debug, Clone)]
+pub struct HmmModel {
+    initial_probs: [f64; NUM_STATES],
+    trans_probs: [[f64; NUM_STATES]; NUM_STATES],
+    emit_probs: [FxHashMap<Box<str>, f64>; NUM_STATES],
+}
 
-    cut_with_allocated_memory(sentence, words, &mut hmm_context)
+impl HmmParams for HmmModel {
+    #[inline]
+    fn initial_prob(&self, state: usize) -> f64 {
+        self.initial_probs[state]
+    }
+
+    #[inline]
+    fn trans_prob(&self, from: usize, to: usize) -> f64 {
+        self.trans_probs[from][to]
+    }
+
+    #[inline]
+    fn emit_prob(&self, state: usize, word: &str) -> f64 {
+        self.emit_probs[state].get(word).copied().unwrap_or(MIN_FLOAT)
+    }
+}
+
+impl HmmModel {
+    /// Load an HMM model from a reader in the `hmm.model` file format.
+    ///
+    /// The format is compatible with the output of `scripts/train_hmm.py`.
+    pub fn load<R: BufRead>(reader: &mut R) -> Result<Self, Error> {
+        let mut data_lines = Vec::new();
+        let mut buf = String::new();
+        while reader.read_line(&mut buf)? > 0 {
+            {
+                let line = buf.trim();
+                if !line.is_empty() && !line.starts_with('#') {
+                    data_lines.push(line.to_string());
+                }
+            }
+            buf.clear();
+        }
+
+        // Line 0: start probs (4 values)
+        if data_lines.len() < 9 {
+            return Err(Error::InvalidHmmModel(format!(
+                "expected at least 9 data lines, got {}",
+                data_lines.len()
+            )));
+        }
+
+        let initial_probs = Self::parse_prob_line(&data_lines[0], "initial")?;
+
+        // Lines 1-4: transition matrix
+        let mut trans_probs = [[0.0f64; NUM_STATES]; NUM_STATES];
+        for i in 0..NUM_STATES {
+            let vals = Self::parse_prob_line(&data_lines[1 + i], "transition")?;
+            trans_probs[i] = vals;
+        }
+
+        // Lines 5-8: emission probs (comma-separated char:prob pairs)
+        let mut emit_probs: [FxHashMap<Box<str>, f64>; NUM_STATES] = [
+            FxHashMap::default(),
+            FxHashMap::default(),
+            FxHashMap::default(),
+            FxHashMap::default(),
+        ];
+        for i in 0..NUM_STATES {
+            for pair in data_lines[5 + i].split(',') {
+                let pair = pair.trim();
+                if pair.is_empty() {
+                    continue;
+                }
+                let colon_pos = pair
+                    .rfind(':')
+                    .ok_or_else(|| Error::InvalidHmmModel(format!("invalid emit pair (missing ':'): `{pair}`")))?;
+                let ch = &pair[..colon_pos];
+                let prob: f64 = pair[colon_pos + 1..]
+                    .parse()
+                    .map_err(|e| Error::InvalidHmmModel(format!("invalid emit prob: {e}")))?;
+                emit_probs[i].insert(ch.into(), prob);
+            }
+        }
+
+        Ok(HmmModel {
+            initial_probs,
+            trans_probs,
+            emit_probs,
+        })
+    }
+
+    fn parse_prob_line(line: &str, context: &str) -> Result<[f64; NUM_STATES], Error> {
+        let vals: Vec<f64> = line
+            .split_whitespace()
+            .map(|v| {
+                v.parse::<f64>()
+                    .map_err(|e| Error::InvalidHmmModel(format!("invalid {context} prob `{v}`: {e}")))
+            })
+            .collect::<Result<_, _>>()?;
+        if vals.len() != NUM_STATES {
+            return Err(Error::InvalidHmmModel(format!(
+                "expected {NUM_STATES} {context} values, got {}",
+                vals.len()
+            )));
+        }
+        Ok([vals[0], vals[1], vals[2], vals[3]])
+    }
+}
+
+pub(crate) fn builtin_hmm() -> BuiltinHmm {
+    BuiltinHmm
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{HmmContext, cut, viterbi};
+    use super::{BuiltinHmm, HmmContext, cut_with_allocated_memory, viterbi};
 
+    fn cut<'a>(sentence: &'a str, words: &mut Vec<&'a str>) {
+        let mut hmm_context = HmmContext::default();
+
+        cut_with_allocated_memory(sentence, words, &BuiltinHmm, &mut hmm_context)
+    }
     #[test]
     #[allow(non_snake_case)]
     fn test_viterbi() {
@@ -231,7 +383,7 @@ mod tests {
         let sentence = "小明硕士毕业于中国科学院计算所";
 
         let mut hmm_context = HmmContext::default();
-        viterbi(sentence, &mut hmm_context);
+        viterbi(sentence, &BuiltinHmm, &mut hmm_context);
         assert_eq!(
             hmm_context.best_path,
             vec![
