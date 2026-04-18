@@ -82,6 +82,7 @@ use regex::{Match, Matches, Regex};
 pub(crate) type FxHashMap<K, V> = HashMap<K, V, rustc_hash::FxBuildHasher>;
 
 pub use crate::errors::Error;
+pub use crate::hmm::HmmModel;
 #[cfg(feature = "textrank")]
 pub use crate::keywords::textrank::TextRank;
 #[cfg(feature = "tfidf")]
@@ -227,6 +228,7 @@ pub struct Jieba {
     records: Vec<Record>,
     cedar: Cedar,
     total: usize,
+    hmm_model: Option<HmmModel>,
 }
 
 impl fmt::Debug for Jieba {
@@ -252,6 +254,7 @@ impl Jieba {
             records: Vec::new(),
             cedar: Cedar::new(),
             total: 0,
+            hmm_model: None,
         }
     }
 
@@ -298,6 +301,29 @@ impl Jieba {
 
         let mut default_dict = BufReader::new(DEFAULT_DICT.as_bytes());
         self.load_dict(&mut default_dict).unwrap();
+    }
+
+    /// Set a custom HMM model for segmentation.
+    ///
+    /// When set, the custom model is used instead of the compile-time embedded model
+    /// for HMM-based segmentation of out-of-vocabulary words.
+    ///
+    /// The model can be trained using `scripts/train_hmm.py`.
+    ///
+    /// ## Example
+    ///
+    /// ```no_run
+    /// use std::io::BufReader;
+    /// use std::fs::File;
+    /// use jieba_rs::{Jieba, HmmModel};
+    ///
+    /// let mut jieba = Jieba::new();
+    /// let mut f = BufReader::new(File::open("my_hmm.model").unwrap());
+    /// let model = HmmModel::load(&mut f).unwrap();
+    /// jieba.set_hmm_model(model);
+    /// ```
+    pub fn set_hmm_model(&mut self, model: HmmModel) {
+        self.hmm_model = Some(model);
     }
 
     /// Clears all data
@@ -562,6 +588,15 @@ impl Jieba {
         route.clear();
     }
 
+    #[inline]
+    fn hmm_cut<'a>(&self, word: &'a str, words: &mut Vec<&'a str>, hmm_context: &mut hmm::HmmContext) {
+        if let Some(ref model) = self.hmm_model {
+            hmm::cut_with_allocated_memory(word, words, model, hmm_context);
+        } else {
+            hmm::cut_with_allocated_memory(word, words, &hmm::builtin_hmm(), hmm_context);
+        }
+    }
+
     #[allow(non_snake_case, clippy::too_many_arguments)]
     fn cut_dag_hmm<'a>(
         &self,
@@ -590,7 +625,7 @@ impl Jieba {
                     if word.chars().nth(1).is_none() {
                         words.push(word);
                     } else if self.cedar.exact_match_search(word).is_none() {
-                        hmm::cut_with_allocated_memory(word, words, hmm_context);
+                        self.hmm_cut(word, words, hmm_context);
                     } else {
                         let mut word_indices = word.char_indices().map(|x| x.0).peekable();
                         while let Some(byte_start) = word_indices.next() {
@@ -615,7 +650,7 @@ impl Jieba {
             if word.chars().nth(1).is_none() {
                 words.push(word);
             } else if self.cedar.exact_match_search(word).is_none() {
-                hmm::cut(word, words);
+                self.hmm_cut(word, words, hmm_context);
             } else {
                 let mut word_indices = word.char_indices().map(|x| x.0).peekable();
                 while let Some(byte_start) = word_indices.next() {
@@ -1518,5 +1553,32 @@ mod tests {
         jieba.add_word("田-女士", Some(42), Some("n"));
         let words = jieba.cut("市民田-女士急匆匆", false);
         assert_eq!(words, vec!["市", "民", "田-女士", "急", "匆", "匆"]);
+    }
+
+    #[test]
+    fn test_cut_with_custom_hmm_model() {
+        use crate::hmm::HmmModel;
+
+        // Load the builtin hmm.model at runtime
+        let hmm_data = include_str!("../../jieba-macros/src/hmm.model");
+        let mut reader = BufReader::new(hmm_data.as_bytes());
+        let model = HmmModel::load(&mut reader).unwrap();
+
+        let mut jieba_custom = Jieba::new();
+        jieba_custom.set_hmm_model(model);
+        let jieba_builtin = Jieba::new();
+
+        // Runtime-loaded model should produce the same results as the builtin
+        let sentences = [
+            "我们中出了一个叛徒",
+            "小明硕士毕业于中国科学院计算所后在日本京都大学深造",
+            "他来到了网易杭研大厦",
+            "我来到北京清华大学",
+        ];
+        for sentence in sentences {
+            let builtin_words = jieba_builtin.cut(sentence, true);
+            let custom_words = jieba_custom.cut(sentence, true);
+            assert_eq!(custom_words, builtin_words, "mismatch for: {sentence}");
+        }
     }
 }

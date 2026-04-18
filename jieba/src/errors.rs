@@ -7,6 +7,8 @@ pub enum Error {
     Io(io::Error),
     /// Invalid entry in dictionary
     InvalidDictEntry(String),
+    /// Invalid HMM model
+    InvalidHmmModel(String),
 }
 
 impl From<io::Error> for Error {
@@ -20,6 +22,7 @@ impl fmt::Display for Error {
         match *self {
             Error::Io(ref err) => err.fmt(f),
             Error::InvalidDictEntry(ref err) => write!(f, "invalid dictionary entry: {err}"),
+            Error::InvalidHmmModel(ref err) => write!(f, "invalid HMM model: {err}"),
         }
     }
 }
@@ -29,6 +32,7 @@ impl error::Error for Error {
         match *self {
             Error::Io(ref err) => Some(err),
             Error::InvalidDictEntry(_) => None,
+            Error::InvalidHmmModel(_) => None,
         }
     }
 }
