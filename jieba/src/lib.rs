@@ -78,7 +78,6 @@ use std::fmt;
 use std::io::BufRead;
 
 use cedarwood::Cedar;
-use regex::{Match, Matches, Regex};
 
 pub(crate) type FxHashMap<K, V> = HashMap<K, V, rustc_hash::FxBuildHasher>;
 
@@ -103,28 +102,95 @@ include_flate::flate!(static DEFAULT_DICT: str from "src/data/dict.txt");
 use sparse_dag::StaticSparseDAG;
 
 thread_local! {
-    static RE_HAN_DEFAULT: Regex = Regex::new(r"([\u{3400}-\u{4DBF}\u{4E00}-\u{9FFF}\u{F900}-\u{FAFF}\u{20000}-\u{2A6DF}\u{2A700}-\u{2B73F}\u{2B740}-\u{2B81F}\u{2B820}-\u{2CEAF}\u{2CEB0}-\u{2EBEF}\u{2F800}-\u{2FA1F}a-zA-Z0-9+#&\._%\-]+)").unwrap();
-    static RE_SKIP_DEFAULT: Regex = Regex::new(r"(\r\n|\s)").unwrap();
-    static RE_HAN_CUT_ALL: Regex = Regex::new(r"([\u{3400}-\u{4DBF}\u{4E00}-\u{9FFF}\u{F900}-\u{FAFF}\u{20000}-\u{2A6DF}\u{2A700}-\u{2B73F}\u{2B740}-\u{2B81F}\u{2B820}-\u{2CEAF}\u{2CEB0}-\u{2EBEF}\u{2F800}-\u{2FA1F}]+)").unwrap();
-    static RE_SKIP_CUT_ALL: Regex = Regex::new(r"[^a-zA-Z0-9+#\n]").unwrap();
     static HMM_CONTEXT: std::cell::RefCell<hmm::HmmContext> = std::cell::RefCell::new(hmm::HmmContext::default());
 }
 
-struct SplitMatches<'r, 't> {
-    finder: Matches<'r, 't>,
-    text: &'t str,
-    last: usize,
-    matched: Option<Match<'t>>,
+/// Check if a character is in a CJK Unified Ideographs range.
+#[inline]
+fn is_cjk(c: char) -> bool {
+    matches!(c,
+        '\u{3400}'..='\u{4DBF}'
+        | '\u{4E00}'..='\u{9FFF}'
+        | '\u{F900}'..='\u{FAFF}'
+        | '\u{20000}'..='\u{2A6DF}'
+        | '\u{2A700}'..='\u{2B73F}'
+        | '\u{2B740}'..='\u{2B81F}'
+        | '\u{2B820}'..='\u{2CEAF}'
+        | '\u{2CEB0}'..='\u{2EBEF}'
+        | '\u{2F800}'..='\u{2FA1F}'
+    )
 }
 
-impl<'r, 't> SplitMatches<'r, 't> {
+/// RE_HAN_DEFAULT character class: CJK + ASCII alphanumeric + `+#&._%\-`
+#[inline]
+fn is_han_default(c: char) -> bool {
+    is_cjk(c) || c.is_ascii_alphanumeric() || matches!(c, '+' | '#' | '&' | '.' | '_' | '%' | '-')
+}
+
+/// RE_HAN_CUT_ALL character class: CJK only
+#[inline]
+fn is_han_cut_all(c: char) -> bool {
+    is_cjk(c)
+}
+
+/// RE_SKIP_CUT_ALL: anything not in `[a-zA-Z0-9+#\n]`
+#[inline]
+fn is_skip_cut_all(c: char) -> bool {
+    !c.is_ascii_alphanumeric() && c != '+' && c != '#' && c != '\n'
+}
+
+/// Iterator that splits text into matched/unmatched regions by a character classifier.
+/// Matched = maximal runs where `classify(c)` is true.
+/// Unmatched = everything between matched runs.
+pub(crate) struct SplitByCharacterClass<'t, F> {
+    text: &'t str,
+    pos: usize,
+    classify: F,
+}
+
+impl<'t, F: Fn(char) -> bool> SplitByCharacterClass<'t, F> {
     #[inline]
-    fn new(re: &'r Regex, text: &'t str) -> SplitMatches<'r, 't> {
-        SplitMatches {
-            finder: re.find_iter(text),
-            text,
-            last: 0,
-            matched: None,
+    fn new(text: &'t str, classify: F) -> Self {
+        SplitByCharacterClass { text, pos: 0, classify }
+    }
+}
+
+impl<'t, F: Fn(char) -> bool> Iterator for SplitByCharacterClass<'t, F> {
+    type Item = SplitState<'t>;
+
+    fn next(&mut self) -> Option<SplitState<'t>> {
+        if self.pos >= self.text.len() {
+            return None;
+        }
+
+        let remaining = &self.text[self.pos..];
+        let first_char = remaining.chars().next().unwrap();
+
+        if (self.classify)(first_char) {
+            // Matched run: consume while classify is true
+            let start = self.pos;
+            let mut end = self.pos + first_char.len_utf8();
+            for c in remaining[first_char.len_utf8()..].chars() {
+                if (self.classify)(c) {
+                    end += c.len_utf8();
+                } else {
+                    break;
+                }
+            }
+            self.pos = end;
+            Some(SplitState::Matched(&self.text[start..end]))
+        } else {
+            // Unmatched run: consume while classify is false
+            let start = self.pos;
+            let mut end = self.pos + first_char.len_utf8();
+            for c in remaining[first_char.len_utf8()..].chars() {
+                if (self.classify)(c) {
+                    break;
+                }
+                end += c.len_utf8();
+            }
+            self.pos = end;
+            Some(SplitState::Unmatched(&self.text[start..end]))
         }
     }
 }
@@ -132,7 +198,7 @@ impl<'r, 't> SplitMatches<'r, 't> {
 #[derive(Debug)]
 pub(crate) enum SplitState<'t> {
     Unmatched(&'t str),
-    Matched(Match<'t>),
+    Matched(&'t str),
 }
 
 impl<'t> SplitState<'t> {
@@ -140,45 +206,13 @@ impl<'t> SplitState<'t> {
     fn as_str(&self) -> &'t str {
         match self {
             SplitState::Unmatched(t) => t,
-            SplitState::Matched(matched) => matched.as_str(),
+            SplitState::Matched(t) => t,
         }
     }
 
     #[inline]
     pub fn is_matched(&self) -> bool {
         matches!(self, SplitState::Matched(_))
-    }
-}
-
-impl<'t> Iterator for SplitMatches<'_, 't> {
-    type Item = SplitState<'t>;
-
-    fn next(&mut self) -> Option<SplitState<'t>> {
-        if let Some(matched) = self.matched.take() {
-            return Some(SplitState::Matched(matched));
-        }
-        match self.finder.next() {
-            None => {
-                if self.last >= self.text.len() {
-                    None
-                } else {
-                    let s = &self.text[self.last..];
-                    self.last = self.text.len();
-                    Some(SplitState::Unmatched(s))
-                }
-            }
-            Some(m) => {
-                if self.last == m.start() {
-                    self.last = m.end();
-                    Some(SplitState::Matched(m))
-                } else {
-                    let unmatched = &self.text[self.last..m.start()];
-                    self.last = m.end();
-                    self.matched = Some(m);
-                    Some(SplitState::Unmatched(unmatched))
-                }
-            }
-        }
     }
 }
 
@@ -721,65 +755,59 @@ impl Jieba {
         let base = sentence.as_ptr() as usize;
         let mut unicode_offset = 0;
 
-        RE_HAN_DEFAULT.with(|re_han| {
-            RE_SKIP_DEFAULT.with(|re_skip| {
-                let heuristic_capacity = sentence.len() / 2;
-                let mut str_words = Vec::with_capacity(heuristic_capacity);
-                let mut tokens = Vec::with_capacity(heuristic_capacity);
+        let heuristic_capacity = sentence.len() / 2;
+        let mut str_words = Vec::with_capacity(heuristic_capacity);
+        let mut tokens = Vec::with_capacity(heuristic_capacity);
 
-                let splitter = SplitMatches::new(re_han, sentence);
-                let mut route = Vec::with_capacity(heuristic_capacity);
-                let mut dag = StaticSparseDAG::with_size_hint(heuristic_capacity);
+        let splitter = SplitByCharacterClass::new(sentence, is_han_default);
+        let mut route = Vec::with_capacity(heuristic_capacity);
+        let mut dag = StaticSparseDAG::with_size_hint(heuristic_capacity);
 
-                for state in splitter {
-                    match state {
-                        SplitState::Matched(_) => {
-                            let block = state.as_str();
-                            assert!(!block.is_empty());
+        for state in splitter {
+            match state {
+                SplitState::Matched(_) => {
+                    let block = state.as_str();
+                    assert!(!block.is_empty());
 
-                            str_words.clear();
-                            if hmm {
-                                HMM_CONTEXT.with(|ctx| {
-                                    let mut hmm_context = ctx.borrow_mut();
-                                    self.cut_dag_hmm(block, &mut str_words, &mut route, &mut dag, &mut hmm_context);
-                                });
-                            } else {
-                                self.cut_dag_no_hmm(block, &mut str_words, &mut route, &mut dag);
-                            }
-                            for &word in &str_words {
-                                tokens.push(Self::make_token_incremental(word, base, &mut unicode_offset));
-                            }
-                        }
-                        SplitState::Unmatched(_) => {
-                            let block = state.as_str();
-                            assert!(!block.is_empty());
-
-                            let skip_splitter = SplitMatches::new(re_skip, block);
-                            for skip_state in skip_splitter {
-                                let word = skip_state.as_str();
-                                if word.is_empty() {
-                                    continue;
-                                }
-                                if skip_state.is_matched() {
-                                    tokens.push(Self::make_token_incremental(word, base, &mut unicode_offset));
-                                } else {
-                                    let mut word_indices = word.char_indices().map(|x| x.0).peekable();
-                                    while let Some(local_start) = word_indices.next() {
-                                        let ch = if let Some(&local_end) = word_indices.peek() {
-                                            &word[local_start..local_end]
-                                        } else {
-                                            &word[local_start..]
-                                        };
-                                        tokens.push(Self::make_token_incremental(ch, base, &mut unicode_offset));
-                                    }
-                                }
-                            }
-                        }
+                    str_words.clear();
+                    if hmm {
+                        HMM_CONTEXT.with(|ctx| {
+                            let mut hmm_context = ctx.borrow_mut();
+                            self.cut_dag_hmm(block, &mut str_words, &mut route, &mut dag, &mut hmm_context);
+                        });
+                    } else {
+                        self.cut_dag_no_hmm(block, &mut str_words, &mut route, &mut dag);
+                    }
+                    for &word in &str_words {
+                        tokens.push(Self::make_token_incremental(word, base, &mut unicode_offset));
                     }
                 }
-                tokens
-            })
-        })
+                SplitState::Unmatched(_) => {
+                    let block = state.as_str();
+                    assert!(!block.is_empty());
+
+                    let mut chars = block.char_indices().peekable();
+                    while let Some((i, c)) = chars.next() {
+                        // Group \r\n as a single token, otherwise emit each char
+                        let word = if c == '\r' {
+                            if let Some(&(_, '\n')) = chars.peek() {
+                                let _ = chars.next();
+                                let end = i + 2;
+                                &block[i..end]
+                            } else {
+                                let end = i + c.len_utf8();
+                                &block[i..end]
+                            }
+                        } else {
+                            let end = i + c.len_utf8();
+                            &block[i..end]
+                        };
+                        tokens.push(Self::make_token_incremental(word, base, &mut unicode_offset));
+                    }
+                }
+            }
+        }
+        tokens
     }
 
     /// Dedicated top-level cut_all implementation that avoids allocating a byte-to-unicode table.
@@ -787,41 +815,47 @@ impl Jieba {
         let base = sentence.as_ptr() as usize;
         let mut unicode_offset = 0;
 
-        RE_HAN_CUT_ALL.with(|re_han| {
-            RE_SKIP_CUT_ALL.with(|re_skip| {
-                let heuristic_capacity = sentence.len() / 2;
-                let mut tokens = Vec::with_capacity(heuristic_capacity);
+        let heuristic_capacity = sentence.len() / 2;
+        let mut tokens = Vec::with_capacity(heuristic_capacity);
 
-                let splitter = SplitMatches::new(re_han, sentence);
+        let splitter = SplitByCharacterClass::new(sentence, is_han_cut_all);
 
-                for state in splitter {
-                    match state {
-                        SplitState::Matched(_) => {
-                            let block = state.as_str();
-                            assert!(!block.is_empty());
-                            let block_unicode_start = unicode_offset;
-                            // Advance unicode_offset past this block
-                            unicode_offset += block.chars().count();
-                            self.cut_all_tokens(block, base, block_unicode_start, &mut tokens);
+        for state in splitter {
+            match state {
+                SplitState::Matched(_) => {
+                    let block = state.as_str();
+                    assert!(!block.is_empty());
+                    let block_unicode_start = unicode_offset;
+                    // Advance unicode_offset past this block
+                    unicode_offset += block.chars().count();
+                    self.cut_all_tokens(block, base, block_unicode_start, &mut tokens);
+                }
+                SplitState::Unmatched(_) => {
+                    let block = state.as_str();
+                    assert!(!block.is_empty());
+
+                    let skip_splitter = SplitByCharacterClass::new(block, is_skip_cut_all);
+                    for skip_state in skip_splitter {
+                        let word = skip_state.as_str();
+                        if word.is_empty() {
+                            continue;
                         }
-                        SplitState::Unmatched(_) => {
-                            let block = state.as_str();
-                            assert!(!block.is_empty());
-
-                            let skip_splitter = SplitMatches::new(re_skip, block);
-                            for skip_state in skip_splitter {
-                                let word = skip_state.as_str();
-                                if word.is_empty() {
-                                    continue;
-                                }
-                                tokens.push(Self::make_token_incremental(word, base, &mut unicode_offset));
+                        if skip_state.is_matched() {
+                            // Emit each char individually to match old RE_SKIP_CUT_ALL
+                            // which matched single characters, not runs.
+                            let mut indices = word.char_indices().peekable();
+                            while let Some((i, _)) = indices.next() {
+                                let end = indices.peek().map_or(word.len(), |&(j, _)| j);
+                                tokens.push(Self::make_token_incremental(&word[i..end], base, &mut unicode_offset));
                             }
+                        } else {
+                            tokens.push(Self::make_token_incremental(word, base, &mut unicode_offset));
                         }
                     }
                 }
-                tokens
-            })
-        })
+            }
+        }
+        tokens
     }
 
     /// Cut the input text
@@ -978,7 +1012,7 @@ impl Jieba {
 
 #[cfg(test)]
 mod tests {
-    use super::{Jieba, RE_HAN_DEFAULT, SplitMatches, SplitState, TokenizeMode};
+    use super::{Jieba, SplitByCharacterClass, SplitState, TokenizeMode, is_han_default};
     use expect_test::expect;
     use std::io::BufReader;
 
@@ -997,34 +1031,44 @@ mod tests {
 
     #[test]
     fn test_split_matches() {
-        RE_HAN_DEFAULT.with(|re_han| {
-            let splitter = SplitMatches::new(
-                re_han,
-                "👪 PS: 我觉得开源有一个好处，就是能够敦促自己不断改进 👪，避免敞帚自珍",
-            );
-            for state in splitter {
-                match state {
-                    SplitState::Matched(_) => {
-                        let block = state.as_str();
-                        assert!(!block.is_empty());
-                    }
-                    SplitState::Unmatched(_) => {
-                        let block = state.as_str();
-                        assert!(!block.is_empty());
-                    }
+        let splitter = SplitByCharacterClass::new(
+            "👪 PS: 我觉得开源有一个好处，就是能够敦促自己不断改进 👪，避免敞帚自珍",
+            is_han_default,
+        );
+        for state in splitter {
+            match state {
+                SplitState::Matched(_) => {
+                    let block = state.as_str();
+                    assert!(!block.is_empty());
+                }
+                SplitState::Unmatched(_) => {
+                    let block = state.as_str();
+                    assert!(!block.is_empty());
                 }
             }
-        });
+        }
     }
 
     #[test]
     fn test_split_matches_against_unicode_sip() {
-        RE_HAN_DEFAULT.with(|re_han| {
-            let splitter = SplitMatches::new(re_han, "讥䶯䶰䶱䶲䶳䶴䶵𦡦");
+        let splitter = SplitByCharacterClass::new("讥䶯䶰䶱䶲䶳䶴䶵𦡦", is_han_default);
 
-            let result: Vec<&str> = splitter.map(|x| x.as_str()).collect();
-            expect![[r#"["讥䶯䶰䶱䶲䶳䶴䶵𦡦"]"#]].assert_eq(&format!("{:?}", result));
-        });
+        let result: Vec<&str> = splitter.map(|x| x.as_str()).collect();
+        expect![[r#"["讥䶯䶰䶱䶲䶳䶴䶵𦡦"]"#]].assert_eq(&format!("{:?}", result));
+    }
+
+    #[test]
+    fn test_cut_all_skip_single_char() {
+        let jieba = Jieba::new();
+        let words: Vec<&str> = jieba.cut_all("a！！b").iter().map(|t| t.word).collect();
+        assert_eq!(words, vec!["a", "！", "！", "b"]);
+    }
+
+    #[test]
+    fn test_cut_default_crlf_and_whitespace() {
+        let jieba = Jieba::new();
+        let words: Vec<&str> = jieba.cut("x\r\n\ty", false).iter().map(|t| t.word).collect();
+        assert_eq!(words, vec!["x", "\r\n", "\t", "y"]);
     }
 
     #[test]
