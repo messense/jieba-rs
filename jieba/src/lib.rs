@@ -94,6 +94,7 @@ mod errors;
 mod hmm;
 #[cfg(any(feature = "tfidf", feature = "textrank"))]
 mod keywords;
+mod posseg;
 mod sparse_dag;
 
 #[cfg(feature = "default-dict")]
@@ -991,23 +992,7 @@ impl Jieba {
                         byte_end: token.byte_end,
                     };
                 }
-                let mut eng = 0;
-                let mut m = 0;
-                for chr in word.chars() {
-                    if chr.is_ascii_alphanumeric() {
-                        eng += 1;
-                        if chr.is_ascii_digit() {
-                            m += 1;
-                        }
-                    }
-                }
-                let tag = if eng == 0 {
-                    "x"
-                } else if eng == m {
-                    "m"
-                } else {
-                    "eng"
-                };
+                let tag = self.guess_tag(word);
                 Tag {
                     word,
                     tag,
@@ -1018,6 +1003,42 @@ impl Jieba {
                 }
             })
             .collect()
+    }
+
+    /// Guess the POS tag for an OOV word.
+    ///
+    /// For CJK words, uses the posseg HMM model (when available) to predict the tag.
+    /// For ASCII words, uses simple heuristics (digits → "m", alpha → "eng", else → "x").
+    fn guess_tag(&self, word: &str) -> &'static str {
+        let mut eng = 0;
+        let mut m = 0;
+        for chr in word.chars() {
+            if chr.is_ascii_alphanumeric() {
+                eng += 1;
+                if chr.is_ascii_digit() {
+                    m += 1;
+                }
+            }
+        }
+        if eng > 0 {
+            return if eng == m { "m" } else { "eng" };
+        }
+
+        #[cfg(feature = "default-dict")]
+        {
+            // Only use posseg HMM for words containing CJK characters
+            if word.chars().any(|c| is_cjk(c)) {
+                let results = posseg::cut_with_pos(word);
+                if results.len() == 1 {
+                    return results[0].1;
+                }
+                if let Some((_w, tag)) = results.iter().max_by_key(|(w, _)| w.len()) {
+                    return tag;
+                }
+            }
+        }
+
+        "x"
     }
 }
 
@@ -1452,7 +1473,7 @@ mod tests {
                 },
                 Tag {
                     word: "张尧",
-                    tag: "x",
+                    tag: "nr",
                     start: 17,
                     end: 19,
                     byte_start: 51,

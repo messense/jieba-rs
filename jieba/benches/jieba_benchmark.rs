@@ -46,6 +46,9 @@ fn criterion_benchmark(c: &mut Criterion) {
     let mut group = c.benchmark_group("jieba");
     group.throughput(Throughput::Bytes(SENTENCE.len() as u64));
     group.bench_function("tag", |b| b.iter(|| JIEBA.tag(black_box(SENTENCE), true)));
+    group.bench_function("tag_with_oov", |b| {
+        b.iter(|| JIEBA.tag(black_box("李小福是创新办主任也是云计算方面的专家"), true))
+    });
     group.finish();
 
     let mut group = c.benchmark_group("keywords");
