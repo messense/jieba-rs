@@ -94,9 +94,9 @@ impl TfIdf {
     /// assert_eq!(
     ///     top_k,
     ///     vec![
-    ///         Keyword { keyword: "不是".to_string(), weight: 4.6335592173333335 },
-    ///         Keyword { keyword: "光化学".to_string(), weight: 4.6335592173333335 },
-    ///         Keyword { keyword: "生化学".to_string(), weight: 4.6335592173333335 }
+    ///         Keyword { keyword: "不是".to_string(), weight: 4.6335592173333335, tag: "c".to_string() },
+    ///         Keyword { keyword: "光化学".to_string(), weight: 4.6335592173333335, tag: "n".to_string() },
+    ///         Keyword { keyword: "生化学".to_string(), weight: 4.6335592173333335, tag: "n".to_string() }
     ///     ],
     /// );
     ///
@@ -106,9 +106,9 @@ impl TfIdf {
     /// assert_eq!(
     ///     new_top_k,
     ///     vec![
-    ///         Keyword { keyword: "不是".to_string(), weight: 33.041152263 },
-    ///         Keyword { keyword: "光化学".to_string(), weight: 33.041152263 },
-    ///         Keyword { keyword: "生化学".to_string(), weight: 4.6335592173333335 }
+    ///         Keyword { keyword: "不是".to_string(), weight: 33.041152263, tag: "c".to_string() },
+    ///         Keyword { keyword: "光化学".to_string(), weight: 33.041152263, tag: "n".to_string() },
+    ///         Keyword { keyword: "生化学".to_string(), weight: 4.6335592173333335, tag: "n".to_string() }
     ///     ]
     /// );
     /// ```
@@ -216,6 +216,7 @@ impl KeywordExtract for TfIdf {
         }
 
         let mut term_freq: HashMap<&str, u64> = HashMap::default();
+        let mut word2tag: HashMap<&str, &str> = HashMap::default();
         for t in &tags {
             if !allowed_pos_set.is_empty() && !allowed_pos_set.contains(t.tag) {
                 continue;
@@ -225,6 +226,7 @@ impl KeywordExtract for TfIdf {
                 continue;
             }
 
+            word2tag.entry(t.word).or_insert(t.tag);
             *term_freq.entry(t.word).or_insert(0) += 1;
         }
 
@@ -248,6 +250,7 @@ impl KeywordExtract for TfIdf {
                 res.push(Keyword {
                     keyword: String::from(w.word),
                     weight: w.tfidf.into_inner(),
+                    tag: String::from(*word2tag.get(w.word).unwrap_or(&"")),
                 });
             }
         }

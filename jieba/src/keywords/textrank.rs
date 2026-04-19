@@ -151,12 +151,15 @@ impl KeywordExtract for TextRank {
 
         let mut word2id: HashMap<&str, usize> =
             HashMap::with_capacity_and_hasher(tags.len() / 2, rustc_hash::FxBuildHasher);
+        let mut word2tag: HashMap<&str, &str> =
+            HashMap::with_capacity_and_hasher(tags.len() / 2, rustc_hash::FxBuildHasher);
         let mut unique_words = Vec::with_capacity(tags.len() / 2);
         for t in &tags {
             if !allowed_pos_set.is_empty() && !allowed_pos_set.contains(t.tag) {
                 continue;
             }
 
+            word2tag.entry(t.word).or_insert(t.tag);
             if !word2id.contains_key(t.word) {
                 unique_words.push(t.word);
                 word2id.insert(t.word, unique_words.len() - 1);
@@ -218,6 +221,7 @@ impl KeywordExtract for TextRank {
                 res.push(Keyword {
                     keyword: unique_words[w.word_id].to_string(),
                     weight: w.rank.into_inner(),
+                    tag: String::from(*word2tag.get(unique_words[w.word_id]).unwrap_or(&"")),
                 });
             }
         }

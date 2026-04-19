@@ -24,6 +24,7 @@ pub static DEFAULT_STOP_WORDS: LazyLock<BTreeSet<String>> = LazyLock::new(|| {
 pub struct Keyword {
     pub keyword: String,
     pub weight: f64,
+    pub tag: String,
 }
 
 /// Creates a KeywordExtractConfig state that contains filter criteria as well as segmentation
