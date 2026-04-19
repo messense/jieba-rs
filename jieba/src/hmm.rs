@@ -4,13 +4,69 @@ use std::io::BufRead;
 use regex::Regex;
 
 use crate::FxHashMap;
-use crate::SplitMatches;
+use crate::SplitByCharacterClass;
 use crate::errors::Error;
 use jieba_macros::generate_hmm_data;
 
 thread_local! {
-    static RE_HAN: Regex = Regex::new(r"([\u{4E00}-\u{9FD5}]+)").unwrap();
     static RE_SKIP: Regex = Regex::new(r"([a-zA-Z0-9]+(?:.\d+)?%?)").unwrap();
+}
+
+/// HMM-specific CJK range `[\u{4E00}-\u{9FD5}]`
+#[inline]
+fn is_hmm_han(c: char) -> bool {
+    matches!(c, '\u{4E00}'..='\u{9FD5}')
+}
+
+/// Regex-based splitter for RE_SKIP in HMM.
+struct HmmSkipSplitter<'r, 't> {
+    finder: regex::Matches<'r, 't>,
+    text: &'t str,
+    last: usize,
+    matched: Option<regex::Match<'t>>,
+}
+
+impl<'r, 't> HmmSkipSplitter<'r, 't> {
+    fn new(re: &'r Regex, text: &'t str) -> Self {
+        HmmSkipSplitter {
+            finder: re.find_iter(text),
+            text,
+            last: 0,
+            matched: None,
+        }
+    }
+}
+
+impl<'t> Iterator for HmmSkipSplitter<'_, 't> {
+    type Item = &'t str;
+
+    fn next(&mut self) -> Option<&'t str> {
+        if let Some(m) = self.matched.take() {
+            return Some(m.as_str());
+        }
+        match self.finder.next() {
+            None => {
+                if self.last >= self.text.len() {
+                    None
+                } else {
+                    let s = &self.text[self.last..];
+                    self.last = self.text.len();
+                    Some(s)
+                }
+            }
+            Some(m) => {
+                if self.last == m.start() {
+                    self.last = m.end();
+                    Some(m.as_str())
+                } else {
+                    let unmatched = &self.text[self.last..m.start()];
+                    self.last = m.end();
+                    self.matched = Some(m);
+                    Some(unmatched)
+                }
+            }
+        }
+    }
 }
 
 pub const NUM_STATES: usize = 4;
@@ -222,32 +278,29 @@ pub(crate) fn cut_with_allocated_memory<'a>(
     params: &impl HmmParams,
     hmm_context: &mut HmmContext,
 ) {
-    RE_HAN.with(|re_han| {
-        RE_SKIP.with(|re_skip| {
-            let splitter = SplitMatches::new(re_han, sentence);
-            for state in splitter {
-                let block = state.as_str();
-                if block.is_empty() {
-                    continue;
-                }
-                if state.is_matched() {
-                    if block.chars().nth(1).is_some() {
-                        cut_internal(block, words, params, hmm_context);
-                    } else {
-                        words.push(block);
-                    }
+    RE_SKIP.with(|re_skip| {
+        let splitter = SplitByCharacterClass::new(sentence, is_hmm_han);
+        for state in splitter {
+            let block = state.as_str();
+            if block.is_empty() {
+                continue;
+            }
+            if state.is_matched() {
+                if block.chars().nth(1).is_some() {
+                    cut_internal(block, words, params, hmm_context);
                 } else {
-                    let skip_splitter = SplitMatches::new(re_skip, block);
-                    for skip_state in skip_splitter {
-                        let x = skip_state.as_str();
-                        if x.is_empty() {
-                            continue;
-                        }
-                        words.push(x);
+                    words.push(block);
+                }
+            } else {
+                let skip_splitter = HmmSkipSplitter::new(re_skip, block);
+                for x in skip_splitter {
+                    if x.is_empty() {
+                        continue;
                     }
+                    words.push(x);
                 }
             }
-        })
+        }
     })
 }
 
