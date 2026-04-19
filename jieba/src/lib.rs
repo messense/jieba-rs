@@ -541,21 +541,33 @@ impl Jieba {
         }
     }
 
-    fn cut_all_internal<'a>(&self, sentence: &'a str, words: &mut Vec<&'a str>) {
-        let str_len = sentence.len();
-        let mut dag = StaticSparseDAG::with_size_hint(sentence.len());
-        self.dag(sentence, &mut dag);
+    /// Emits `Token`s directly with unicode positions for cut_all,
+    /// avoiding the need for a separate byte-to-unicode lookup table.
+    fn cut_all_tokens<'a>(&self, block: &'a str, base: usize, block_unicode_start: usize, tokens: &mut Vec<Token<'a>>) {
+        let str_len = block.len();
+        let mut dag = StaticSparseDAG::with_size_hint(block.len());
+        self.dag(block, &mut dag);
 
-        let curr = sentence.char_indices().map(|x| x.0);
-        for byte_start in curr {
+        let block_base = block.as_ptr() as usize;
+        let byte_offset_in_sentence = block_base - base;
+
+        for (unicode_idx, (byte_start, _)) in block.char_indices().enumerate() {
+            let unicode_start = block_unicode_start + unicode_idx;
             for (byte_end, _) in dag.iter_edges(byte_start) {
                 let word = if byte_end == str_len {
-                    &sentence[byte_start..]
+                    &block[byte_start..]
                 } else {
-                    &sentence[byte_start..byte_end]
+                    &block[byte_start..byte_end]
                 };
-
-                words.push(word)
+                let char_count = word.as_bytes().iter().filter(|&&b| (b as i8) >= -0x40).count();
+                let bs = byte_offset_in_sentence + byte_start;
+                tokens.push(Token {
+                    word,
+                    start: unicode_start,
+                    end: unicode_start + char_count,
+                    byte_start: bs,
+                    byte_end: bs + word.len(),
+                });
             }
         }
     }
@@ -680,43 +692,6 @@ impl Jieba {
         route.clear();
     }
 
-    /// Build a byte-offset to unicode-offset lookup table for the given string.
-    /// Only char-boundary byte offsets (and the final offset at `s.len()`) are populated.
-    /// Used only for cut_all where tokens overlap.
-    fn byte_to_unicode_table(s: &str) -> Vec<usize> {
-        let mut table = vec![0usize; s.len() + 1];
-        let mut unicode_pos = 0;
-        for (byte_pos, _) in s.char_indices() {
-            table[byte_pos] = unicode_pos;
-            unicode_pos += 1;
-        }
-        table[s.len()] = unicode_pos;
-        table
-    }
-
-    /// Create a Token from a word slice, computing positions from the lookup table.
-    /// `word` must be a subslice of the sentence that `base` and `b2u` were derived from.
-    #[inline]
-    fn make_token<'a>(word: &'a str, sentence: &str, base: usize, b2u: &[usize]) -> Token<'a> {
-        let ptr = word.as_ptr() as usize;
-        debug_assert!(ptr >= base, "word is not a subslice of sentence");
-        let byte_start = ptr - base;
-        let byte_end = byte_start + word.len();
-        debug_assert!(byte_end <= sentence.len(), "word extends beyond sentence");
-        debug_assert!(
-            sentence.is_char_boundary(byte_start),
-            "byte_start is not a char boundary"
-        );
-        debug_assert!(sentence.is_char_boundary(byte_end), "byte_end is not a char boundary");
-        Token {
-            word,
-            start: b2u[byte_start],
-            end: b2u[byte_end],
-            byte_start,
-            byte_end,
-        }
-    }
-
     /// Create a Token with incrementally tracked unicode offset.
     /// Returns the updated unicode_offset (past the end of this token).
     #[inline]
@@ -740,20 +715,14 @@ impl Jieba {
 
     #[allow(non_snake_case)]
     fn cut_internal<'a>(&self, sentence: &'a str, cut_all: bool, hmm: bool) -> Vec<Token<'a>> {
-        let re_han = if cut_all { &RE_HAN_CUT_ALL } else { &RE_HAN_DEFAULT };
-        let re_skip = if cut_all { &RE_SKIP_CUT_ALL } else { &RE_SKIP_DEFAULT };
+        if cut_all {
+            return self.cut_all_toplevel(sentence);
+        }
         let base = sentence.as_ptr() as usize;
-        // Only allocate the lookup table for cut_all (overlapping tokens).
-        // For cut/cut_for_search, tokens are contiguous so we track unicode offset incrementally.
-        let b2u = if cut_all {
-            Self::byte_to_unicode_table(sentence)
-        } else {
-            Vec::new()
-        };
         let mut unicode_offset = 0;
 
-        re_han.with(|re_han| {
-            re_skip.with(|re_skip| {
+        RE_HAN_DEFAULT.with(|re_han| {
+            RE_SKIP_DEFAULT.with(|re_skip| {
                 let heuristic_capacity = sentence.len() / 2;
                 let mut str_words = Vec::with_capacity(heuristic_capacity);
                 let mut tokens = Vec::with_capacity(heuristic_capacity);
@@ -769,9 +738,7 @@ impl Jieba {
                             assert!(!block.is_empty());
 
                             str_words.clear();
-                            if cut_all {
-                                self.cut_all_internal(block, &mut str_words);
-                            } else if hmm {
+                            if hmm {
                                 HMM_CONTEXT.with(|ctx| {
                                     let mut hmm_context = ctx.borrow_mut();
                                     self.cut_dag_hmm(block, &mut str_words, &mut route, &mut dag, &mut hmm_context);
@@ -780,11 +747,7 @@ impl Jieba {
                                 self.cut_dag_no_hmm(block, &mut str_words, &mut route, &mut dag);
                             }
                             for &word in &str_words {
-                                if cut_all {
-                                    tokens.push(Self::make_token(word, sentence, base, &b2u));
-                                } else {
-                                    tokens.push(Self::make_token_incremental(word, base, &mut unicode_offset));
-                                }
+                                tokens.push(Self::make_token_incremental(word, base, &mut unicode_offset));
                             }
                         }
                         SplitState::Unmatched(_) => {
@@ -797,12 +760,8 @@ impl Jieba {
                                 if word.is_empty() {
                                     continue;
                                 }
-                                if cut_all || skip_state.is_matched() {
-                                    if cut_all {
-                                        tokens.push(Self::make_token(word, sentence, base, &b2u));
-                                    } else {
-                                        tokens.push(Self::make_token_incremental(word, base, &mut unicode_offset));
-                                    }
+                                if skip_state.is_matched() {
+                                    tokens.push(Self::make_token_incremental(word, base, &mut unicode_offset));
                                 } else {
                                     let mut word_indices = word.char_indices().map(|x| x.0).peekable();
                                     while let Some(local_start) = word_indices.next() {
@@ -811,13 +770,51 @@ impl Jieba {
                                         } else {
                                             &word[local_start..]
                                         };
-                                        if cut_all {
-                                            tokens.push(Self::make_token(ch, sentence, base, &b2u));
-                                        } else {
-                                            tokens.push(Self::make_token_incremental(ch, base, &mut unicode_offset));
-                                        }
+                                        tokens.push(Self::make_token_incremental(ch, base, &mut unicode_offset));
                                     }
                                 }
+                            }
+                        }
+                    }
+                }
+                tokens
+            })
+        })
+    }
+
+    /// Dedicated top-level cut_all implementation that avoids allocating a byte-to-unicode table.
+    fn cut_all_toplevel<'a>(&self, sentence: &'a str) -> Vec<Token<'a>> {
+        let base = sentence.as_ptr() as usize;
+        let mut unicode_offset = 0;
+
+        RE_HAN_CUT_ALL.with(|re_han| {
+            RE_SKIP_CUT_ALL.with(|re_skip| {
+                let heuristic_capacity = sentence.len() / 2;
+                let mut tokens = Vec::with_capacity(heuristic_capacity);
+
+                let splitter = SplitMatches::new(re_han, sentence);
+
+                for state in splitter {
+                    match state {
+                        SplitState::Matched(_) => {
+                            let block = state.as_str();
+                            assert!(!block.is_empty());
+                            let block_unicode_start = unicode_offset;
+                            // Advance unicode_offset past this block
+                            unicode_offset += block.chars().count();
+                            self.cut_all_tokens(block, base, block_unicode_start, &mut tokens);
+                        }
+                        SplitState::Unmatched(_) => {
+                            let block = state.as_str();
+                            assert!(!block.is_empty());
+
+                            let skip_splitter = SplitMatches::new(re_skip, block);
+                            for skip_state in skip_splitter {
+                                let word = skip_state.as_str();
+                                if word.is_empty() {
+                                    continue;
+                                }
+                                tokens.push(Self::make_token_incremental(word, base, &mut unicode_offset));
                             }
                         }
                     }
