@@ -33,21 +33,23 @@ pub fn generate_hmm_data(_input: TokenStream) -> TokenStream {
     // Emission probabilities
     for (i, line) in lines.filter(|x| !x.starts_with('#')).enumerate() {
         output.push_str("#[allow(clippy::style)]\n");
-        output.push_str(&format!("pub static EMIT_PROB_{i}: phf::Map<&'static str, f64> = "));
+        output.push_str(&format!("pub static EMIT_PROB_{i}: phf::Map<char, f64> = "));
 
         let mut map = phf_codegen::Map::new();
         for word_prob in line.split(',') {
             let mut parts = word_prob.split(':');
             let word = parts.next().unwrap();
             let prob = parts.next().unwrap();
-            map.entry(word, prob);
+            // All emit keys are single characters
+            let ch = word.chars().next().unwrap();
+            map.entry(ch, prob);
         }
         output.push_str(&map.build().to_string());
         output.push_str(";\n\n");
     }
 
     output.push_str("#[allow(clippy::style)]\n");
-    output.push_str("pub static EMIT_PROBS: [&'static phf::Map<&'static str, f64>; 4] = [&EMIT_PROB_0, &EMIT_PROB_1, &EMIT_PROB_2, &EMIT_PROB_3];\n\n");
+    output.push_str("pub static EMIT_PROBS: [&'static phf::Map<char, f64>; 4] = [&EMIT_PROB_0, &EMIT_PROB_1, &EMIT_PROB_2, &EMIT_PROB_3];\n\n");
 
     output.parse().unwrap()
 }

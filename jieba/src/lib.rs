@@ -259,13 +259,24 @@ pub struct Tag<'a> {
 #[derive(Debug, Clone)]
 struct Record {
     freq: usize,
+    log_freq: f64,
     tag: Box<str>,
 }
 
 impl Record {
     #[inline(always)]
     fn new(freq: usize, tag: Box<str>) -> Self {
-        Self { freq, tag }
+        Self {
+            freq,
+            log_freq: (freq as f64).ln(),
+            tag,
+        }
+    }
+
+    #[inline]
+    fn set_freq(&mut self, freq: usize) {
+        self.freq = freq;
+        self.log_freq = (freq as f64).ln();
     }
 }
 
@@ -415,7 +426,7 @@ impl Jieba {
         match self.cedar.exact_match_search(word) {
             Some((word_id, _, _)) => {
                 let old_freq = self.records[word_id as usize].freq;
-                self.records[word_id as usize].freq = freq;
+                self.records[word_id as usize].set_freq(freq);
 
                 self.total += freq;
                 self.total -= old_freq;
@@ -492,7 +503,7 @@ impl Jieba {
 
                     match self.cedar.exact_match_search(word) {
                         Some((word_id, _, _)) => {
-                            self.records[word_id as usize].freq = freq;
+                            self.records[word_id as usize].set_freq(freq);
                         }
                         None => {
                             let word_id = self.records.len() as i32;
@@ -534,19 +545,20 @@ impl Jieba {
         }
 
         let logtotal = (self.total as f64).ln();
+        let log1 = 0.0f64 - logtotal; // ln(1) - logtotal, precomputed for freq=1 case
         let mut prev_byte_start = str_len;
         let curr = sentence.char_indices().map(|x| x.0).rev();
         for byte_start in curr {
             let pair = dag
                 .iter_edges(byte_start)
                 .map(|(byte_end, word_id)| {
-                    let freq = if word_id != sparse_dag::NO_MATCH {
-                        self.records[word_id as usize].freq
+                    let log_freq = if word_id != sparse_dag::NO_MATCH {
+                        self.records[word_id as usize].log_freq
                     } else {
-                        1
+                        0.0 // ln(1)
                     };
 
-                    ((freq as f64).ln() - logtotal + route[byte_end].0, byte_end)
+                    (log_freq - logtotal + route[byte_end].0, byte_end)
                 })
                 .max_by(|x, y| x.partial_cmp(y).unwrap_or(Ordering::Equal));
 
@@ -554,8 +566,7 @@ impl Jieba {
                 route[byte_start] = p;
             } else {
                 let byte_end = prev_byte_start;
-                let freq = 1;
-                route[byte_start] = ((freq as f64).ln() - logtotal + route[byte_end].0, byte_end);
+                route[byte_start] = (log1 + route[byte_end].0, byte_end);
             }
 
             prev_byte_start = byte_start;
