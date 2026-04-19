@@ -7,5 +7,6 @@ use wasm_bindgen_test::*;
 fn test_jieba_cut() {
     let jieba = Jieba::new();
     let words = jieba.cut("我们中出了一个叛徒", false);
+    let words: Vec<&str> = words.iter().map(|t| t.word).collect();
     assert_eq!(words, vec!["我们", "中", "出", "了", "一个", "叛徒"]);
 }

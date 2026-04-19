@@ -31,6 +31,7 @@ regex = { workspace = true }
 
 [dev-dependencies]
 codspeed-criterion-compat = { workspace = true }
+expect-test = { workspace = true }
 wasm-bindgen-test = { workspace = true }
 rayon = { workspace = true }
 

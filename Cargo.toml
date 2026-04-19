@@ -25,4 +25,5 @@ phf = { version = "0.13.1" }
 phf_codegen = { version = "0.13.1" }
 rayon = { version = "1.11" }
 regex = { version = "1.11.2" }
+expect-test = { version = "1.5" }
 wasm-bindgen-test = { version = "0.3.50" }

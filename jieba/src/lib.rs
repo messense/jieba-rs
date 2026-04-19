@@ -18,6 +18,7 @@
 //!
 //! let jieba = Jieba::new();
 //! let words = jieba.cut("我们中出了一个叛徒", false);
+//! let words: Vec<&str> = words.iter().map(|t| t.word).collect();
 //! assert_eq!(words, vec!["我们", "中", "出", "了", "一个", "叛徒"]);
 //! ```
 //!
@@ -198,6 +199,10 @@ pub struct Token<'a> {
     pub start: usize,
     /// Unicode end position of the token
     pub end: usize,
+    /// Byte start position of the token in the original input
+    pub byte_start: usize,
+    /// Byte end position of the token in the original input
+    pub byte_end: usize,
 }
 
 /// A tagged word
@@ -207,6 +212,14 @@ pub struct Tag<'a> {
     pub word: &'a str,
     /// Word tag
     pub tag: &'a str,
+    /// Unicode start position of the word in the original input
+    pub start: usize,
+    /// Unicode end position of the word in the original input
+    pub end: usize,
+    /// Byte start position of the word in the original input
+    pub byte_start: usize,
+    /// Byte end position of the word in the original input
+    pub byte_end: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -472,8 +485,8 @@ impl Jieba {
     /// Suggest word frequency to force the characters in a word to be joined or split.
     pub fn suggest_freq(&self, segment: &str) -> usize {
         let logtotal = (self.total as f64).ln();
-        let logfreq = self.cut(segment, false).iter().fold(0f64, |freq, word| {
-            freq + (self.get_word_freq(word, 1) as f64).ln() - logtotal
+        let logfreq = self.cut(segment, false).iter().fold(0f64, |freq, token| {
+            freq + (self.get_word_freq(token.word, 1) as f64).ln() - logtotal
         });
         std::cmp::max((logfreq + logtotal).exp() as usize + 1, self.get_word_freq(segment, 1))
     }
@@ -528,21 +541,33 @@ impl Jieba {
         }
     }
 
-    fn cut_all_internal<'a>(&self, sentence: &'a str, words: &mut Vec<&'a str>) {
-        let str_len = sentence.len();
-        let mut dag = StaticSparseDAG::with_size_hint(sentence.len());
-        self.dag(sentence, &mut dag);
+    /// Emits `Token`s directly with unicode positions for cut_all,
+    /// avoiding the need for a separate byte-to-unicode lookup table.
+    fn cut_all_tokens<'a>(&self, block: &'a str, base: usize, block_unicode_start: usize, tokens: &mut Vec<Token<'a>>) {
+        let str_len = block.len();
+        let mut dag = StaticSparseDAG::with_size_hint(block.len());
+        self.dag(block, &mut dag);
 
-        let curr = sentence.char_indices().map(|x| x.0);
-        for byte_start in curr {
+        let block_base = block.as_ptr() as usize;
+        let byte_offset_in_sentence = block_base - base;
+
+        for (unicode_idx, (byte_start, _)) in block.char_indices().enumerate() {
+            let unicode_start = block_unicode_start + unicode_idx;
             for (byte_end, _) in dag.iter_edges(byte_start) {
                 let word = if byte_end == str_len {
-                    &sentence[byte_start..]
+                    &block[byte_start..]
                 } else {
-                    &sentence[byte_start..byte_end]
+                    &block[byte_start..byte_end]
                 };
-
-                words.push(word)
+                let char_count = word.as_bytes().iter().filter(|&&b| (b as i8) >= -0x40).count();
+                let bs = byte_offset_in_sentence + byte_start;
+                tokens.push(Token {
+                    word,
+                    start: unicode_start,
+                    end: unicode_start + char_count,
+                    byte_start: bs,
+                    byte_end: bs + word.len(),
+                });
             }
         }
     }
@@ -667,15 +692,40 @@ impl Jieba {
         route.clear();
     }
 
-    #[allow(non_snake_case)]
-    fn cut_internal<'a>(&self, sentence: &'a str, cut_all: bool, hmm: bool) -> Vec<&'a str> {
-        let re_han = if cut_all { &RE_HAN_CUT_ALL } else { &RE_HAN_DEFAULT };
-        let re_skip = if cut_all { &RE_SKIP_CUT_ALL } else { &RE_SKIP_DEFAULT };
+    /// Create a Token with incrementally tracked unicode offset.
+    /// Returns the updated unicode_offset (past the end of this token).
+    #[inline]
+    fn make_token_incremental<'a>(word: &'a str, base: usize, unicode_offset: &mut usize) -> Token<'a> {
+        let ptr = word.as_ptr() as usize;
+        debug_assert!(ptr >= base, "word is not a subslice of sentence");
+        let byte_start = ptr - base;
+        let byte_end = byte_start + word.len();
+        let start = *unicode_offset;
+        // Count UTF-8 leading bytes to get char count without allocating
+        let char_count = word.as_bytes().iter().filter(|&&b| (b as i8) >= -0x40).count();
+        *unicode_offset = start + char_count;
+        Token {
+            word,
+            start,
+            end: *unicode_offset,
+            byte_start,
+            byte_end,
+        }
+    }
 
-        re_han.with(|re_han| {
-            re_skip.with(|re_skip| {
+    #[allow(non_snake_case)]
+    fn cut_internal<'a>(&self, sentence: &'a str, cut_all: bool, hmm: bool) -> Vec<Token<'a>> {
+        if cut_all {
+            return self.cut_all_toplevel(sentence);
+        }
+        let base = sentence.as_ptr() as usize;
+        let mut unicode_offset = 0;
+
+        RE_HAN_DEFAULT.with(|re_han| {
+            RE_SKIP_DEFAULT.with(|re_skip| {
                 let heuristic_capacity = sentence.len() / 2;
-                let mut words = Vec::with_capacity(heuristic_capacity);
+                let mut str_words = Vec::with_capacity(heuristic_capacity);
+                let mut tokens = Vec::with_capacity(heuristic_capacity);
 
                 let splitter = SplitMatches::new(re_han, sentence);
                 let mut route = Vec::with_capacity(heuristic_capacity);
@@ -687,15 +737,17 @@ impl Jieba {
                             let block = state.as_str();
                             assert!(!block.is_empty());
 
-                            if cut_all {
-                                self.cut_all_internal(block, &mut words);
-                            } else if hmm {
+                            str_words.clear();
+                            if hmm {
                                 HMM_CONTEXT.with(|ctx| {
                                     let mut hmm_context = ctx.borrow_mut();
-                                    self.cut_dag_hmm(block, &mut words, &mut route, &mut dag, &mut hmm_context);
+                                    self.cut_dag_hmm(block, &mut str_words, &mut route, &mut dag, &mut hmm_context);
                                 });
                             } else {
-                                self.cut_dag_no_hmm(block, &mut words, &mut route, &mut dag);
+                                self.cut_dag_no_hmm(block, &mut str_words, &mut route, &mut dag);
+                            }
+                            for &word in &str_words {
+                                tokens.push(Self::make_token_incremental(word, base, &mut unicode_offset));
                             }
                         }
                         SplitState::Unmatched(_) => {
@@ -708,23 +760,66 @@ impl Jieba {
                                 if word.is_empty() {
                                     continue;
                                 }
-                                if cut_all || skip_state.is_matched() {
-                                    words.push(word);
+                                if skip_state.is_matched() {
+                                    tokens.push(Self::make_token_incremental(word, base, &mut unicode_offset));
                                 } else {
                                     let mut word_indices = word.char_indices().map(|x| x.0).peekable();
-                                    while let Some(byte_start) = word_indices.next() {
-                                        if let Some(byte_end) = word_indices.peek() {
-                                            words.push(&word[byte_start..*byte_end]);
+                                    while let Some(local_start) = word_indices.next() {
+                                        let ch = if let Some(&local_end) = word_indices.peek() {
+                                            &word[local_start..local_end]
                                         } else {
-                                            words.push(&word[byte_start..]);
-                                        }
+                                            &word[local_start..]
+                                        };
+                                        tokens.push(Self::make_token_incremental(ch, base, &mut unicode_offset));
                                     }
                                 }
                             }
                         }
                     }
                 }
-                words
+                tokens
+            })
+        })
+    }
+
+    /// Dedicated top-level cut_all implementation that avoids allocating a byte-to-unicode table.
+    fn cut_all_toplevel<'a>(&self, sentence: &'a str) -> Vec<Token<'a>> {
+        let base = sentence.as_ptr() as usize;
+        let mut unicode_offset = 0;
+
+        RE_HAN_CUT_ALL.with(|re_han| {
+            RE_SKIP_CUT_ALL.with(|re_skip| {
+                let heuristic_capacity = sentence.len() / 2;
+                let mut tokens = Vec::with_capacity(heuristic_capacity);
+
+                let splitter = SplitMatches::new(re_han, sentence);
+
+                for state in splitter {
+                    match state {
+                        SplitState::Matched(_) => {
+                            let block = state.as_str();
+                            assert!(!block.is_empty());
+                            let block_unicode_start = unicode_offset;
+                            // Advance unicode_offset past this block
+                            unicode_offset += block.chars().count();
+                            self.cut_all_tokens(block, base, block_unicode_start, &mut tokens);
+                        }
+                        SplitState::Unmatched(_) => {
+                            let block = state.as_str();
+                            assert!(!block.is_empty());
+
+                            let skip_splitter = SplitMatches::new(re_skip, block);
+                            for skip_state in skip_splitter {
+                                let word = skip_state.as_str();
+                                if word.is_empty() {
+                                    continue;
+                                }
+                                tokens.push(Self::make_token_incremental(word, base, &mut unicode_offset));
+                            }
+                        }
+                    }
+                }
+                tokens
             })
         })
     }
@@ -736,7 +831,7 @@ impl Jieba {
     /// `sentence`: input text
     ///
     /// `hmm`: enable HMM or not
-    pub fn cut<'a>(&self, sentence: &'a str, hmm: bool) -> Vec<&'a str> {
+    pub fn cut<'a>(&self, sentence: &'a str, hmm: bool) -> Vec<Token<'a>> {
         self.cut_internal(sentence, false, hmm)
     }
 
@@ -745,7 +840,7 @@ impl Jieba {
     /// ## Params
     ///
     /// `sentence`: input text
-    pub fn cut_all<'a>(&self, sentence: &'a str) -> Vec<&'a str> {
+    pub fn cut_all<'a>(&self, sentence: &'a str) -> Vec<Token<'a>> {
         self.cut_internal(sentence, true, false)
     }
 
@@ -756,39 +851,57 @@ impl Jieba {
     /// `sentence`: input text
     ///
     /// `hmm`: enable HMM or not
-    pub fn cut_for_search<'a>(&self, sentence: &'a str, hmm: bool) -> Vec<&'a str> {
+    pub fn cut_for_search<'a>(&self, sentence: &'a str, hmm: bool) -> Vec<Token<'a>> {
         let words = self.cut(sentence, hmm);
         let mut new_words = Vec::with_capacity(words.len());
-        for word in words {
+        let base = sentence.as_ptr() as usize;
+        for token in words {
+            let word = token.word;
             let char_indices: Vec<usize> = word.char_indices().map(|x| x.0).collect();
             let char_count = char_indices.len();
             if char_count > 2 {
                 for i in 0..char_count - 1 {
-                    let byte_start = char_indices[i];
+                    let local_byte_start = char_indices[i];
                     let gram2 = if i + 2 < char_count {
-                        &word[byte_start..char_indices[i + 2]]
+                        &word[local_byte_start..char_indices[i + 2]]
                     } else {
-                        &word[byte_start..]
+                        &word[local_byte_start..]
                     };
                     if self.cedar.exact_match_search(gram2).is_some() {
-                        new_words.push(gram2);
+                        let byte_start = gram2.as_ptr() as usize - base;
+                        let byte_end = byte_start + gram2.len();
+                        new_words.push(Token {
+                            word: gram2,
+                            start: token.start + i,
+                            end: token.start + i + 2,
+                            byte_start,
+                            byte_end,
+                        });
                     }
                 }
             }
             if char_count > 3 {
                 for i in 0..char_count - 2 {
-                    let byte_start = char_indices[i];
+                    let local_byte_start = char_indices[i];
                     let gram3 = if i + 3 < char_count {
-                        &word[byte_start..char_indices[i + 3]]
+                        &word[local_byte_start..char_indices[i + 3]]
                     } else {
-                        &word[byte_start..]
+                        &word[local_byte_start..]
                     };
                     if self.cedar.exact_match_search(gram3).is_some() {
-                        new_words.push(gram3);
+                        let byte_start = gram3.as_ptr() as usize - base;
+                        let byte_end = byte_start + gram3.len();
+                        new_words.push(Token {
+                            word: gram3,
+                            start: token.start + i,
+                            end: token.start + i + 3,
+                            byte_start,
+                            byte_end,
+                        });
                     }
                 }
             }
-            new_words.push(word);
+            new_words.push(token);
         }
         new_words
     }
@@ -803,69 +916,10 @@ impl Jieba {
     ///
     /// `hmm`: enable HMM or not
     pub fn tokenize<'a>(&self, sentence: &'a str, mode: TokenizeMode, hmm: bool) -> Vec<Token<'a>> {
-        let words = self.cut(sentence, hmm);
-        let mut tokens = Vec::with_capacity(words.len());
-        let mut start = 0;
         match mode {
-            TokenizeMode::Default => {
-                for word in words {
-                    let width = word.chars().count();
-                    tokens.push(Token {
-                        word,
-                        start,
-                        end: start + width,
-                    });
-                    start += width;
-                }
-            }
-            TokenizeMode::Search => {
-                for word in words {
-                    let width = word.chars().count();
-                    if width > 2 {
-                        let char_indices: Vec<usize> = word.char_indices().map(|x| x.0).collect();
-                        for i in 0..width - 1 {
-                            let byte_start = char_indices[i];
-                            let gram2 = if i + 2 < width {
-                                &word[byte_start..char_indices[i + 2]]
-                            } else {
-                                &word[byte_start..]
-                            };
-                            if self.cedar.exact_match_search(gram2).is_some() {
-                                tokens.push(Token {
-                                    word: gram2,
-                                    start: start + i,
-                                    end: start + i + 2,
-                                });
-                            }
-                        }
-                        if width > 3 {
-                            for i in 0..width - 2 {
-                                let byte_start = char_indices[i];
-                                let gram3 = if i + 3 < width {
-                                    &word[byte_start..char_indices[i + 3]]
-                                } else {
-                                    &word[byte_start..]
-                                };
-                                if self.cedar.exact_match_search(gram3).is_some() {
-                                    tokens.push(Token {
-                                        word: gram3,
-                                        start: start + i,
-                                        end: start + i + 3,
-                                    });
-                                }
-                            }
-                        }
-                    }
-                    tokens.push(Token {
-                        word,
-                        start,
-                        end: start + width,
-                    });
-                    start += width;
-                }
-            }
+            TokenizeMode::Default => self.cut(sentence, hmm),
+            TokenizeMode::Search => self.cut_for_search(sentence, hmm),
         }
-        tokens
     }
 
     /// Tag the input text
@@ -876,13 +930,21 @@ impl Jieba {
     ///
     /// `hmm`: enable HMM or not
     pub fn tag<'a>(&'a self, sentence: &'a str, hmm: bool) -> Vec<Tag<'a>> {
-        let words = self.cut(sentence, hmm);
-        words
+        let tokens = self.cut(sentence, hmm);
+        tokens
             .into_iter()
-            .map(|word| {
+            .map(|token| {
+                let word = token.word;
                 if let Some((word_id, _, _)) = self.cedar.exact_match_search(word) {
                     let t = &self.records[word_id as usize].tag;
-                    return Tag { word, tag: t };
+                    return Tag {
+                        word,
+                        tag: t,
+                        start: token.start,
+                        end: token.end,
+                        byte_start: token.byte_start,
+                        byte_end: token.byte_end,
+                    };
                 }
                 let mut eng = 0;
                 let mut m = 0;
@@ -901,7 +963,14 @@ impl Jieba {
                 } else {
                     "eng"
                 };
-                Tag { word, tag }
+                Tag {
+                    word,
+                    tag,
+                    start: token.start,
+                    end: token.end,
+                    byte_start: token.byte_start,
+                    byte_end: token.byte_end,
+                }
             })
             .collect()
     }
@@ -909,7 +978,8 @@ impl Jieba {
 
 #[cfg(test)]
 mod tests {
-    use super::{Jieba, RE_HAN_DEFAULT, SplitMatches, SplitState, Tag, Token, TokenizeMode};
+    use super::{Jieba, RE_HAN_DEFAULT, SplitMatches, SplitState, TokenizeMode};
+    use expect_test::expect;
     use std::io::BufReader;
 
     #[test]
@@ -953,90 +1023,64 @@ mod tests {
             let splitter = SplitMatches::new(re_han, "讥䶯䶰䶱䶲䶳䶴䶵𦡦");
 
             let result: Vec<&str> = splitter.map(|x| x.as_str()).collect();
-            assert_eq!(result, vec!["讥䶯䶰䶱䶲䶳䶴䶵𦡦"]);
+            expect![[r#"["讥䶯䶰䶱䶲䶳䶴䶵𦡦"]"#]].assert_eq(&format!("{:?}", result));
         });
     }
 
     #[test]
     fn test_cut_all() {
         let jieba = Jieba::new();
-        let words = jieba.cut_all("abc网球拍卖会def");
-        assert_eq!(
-            words,
-            vec![
-                "abc",
-                "网",
-                "网球",
-                "网球拍",
-                "球",
-                "球拍",
-                "拍",
-                "拍卖",
-                "拍卖会",
-                "卖",
-                "会",
-                "def"
-            ]
-        );
+        let tokens = jieba.cut_all("abc网球拍卖会def");
+        let words: Vec<&str> = tokens.iter().map(|t| t.word).collect();
+        expect![[r#"["abc", "网", "网球", "网球拍", "球", "球拍", "拍", "拍卖", "拍卖会", "卖", "会", "def"]"#]]
+            .assert_eq(&format!("{:?}", words));
 
         // The cut_all from the python de-facto implementation is loosely defined,
         // And the answer "我, 来到, 北京, 清华, 清华大学, 华大, 大学" from the python implementation looks weird since it drops the single character word even though it is part of the DAG candidates.
         // For example, it includes "华大" but it doesn't include "清" and "学"
-        let words = jieba.cut_all("我来到北京清华大学");
-        assert_eq!(
-            words,
-            vec![
-                "我",
-                "来",
-                "来到",
-                "到",
-                "北",
-                "北京",
-                "京",
-                "清",
-                "清华",
-                "清华大学",
-                "华",
-                "华大",
-                "大",
-                "大学",
-                "学"
-            ]
-        );
+        let tokens = jieba.cut_all("我来到北京清华大学");
+        let words: Vec<&str> = tokens.iter().map(|t| t.word).collect();
+        expect![[r#"["我", "来", "来到", "到", "北", "北京", "京", "清", "清华", "清华大学", "华", "华大", "大", "大学", "学"]"#]]
+            .assert_eq(&format!("{:?}", words));
     }
 
     #[test]
     fn test_cut_no_hmm() {
         let jieba = Jieba::new();
-        let words = jieba.cut("abc网球拍卖会def", false);
-        assert_eq!(words, vec!["abc", "网球", "拍卖会", "def"]);
+        let tokens = jieba.cut("abc网球拍卖会def", false);
+        let words: Vec<&str> = tokens.iter().map(|t| t.word).collect();
+        expect![[r#"["abc", "网球", "拍卖会", "def"]"#]].assert_eq(&format!("{:?}", words));
     }
 
     #[test]
     fn test_cut_no_hmm1() {
         let jieba = Jieba::new();
-        let words = jieba.cut("abc网球拍卖会def！！？\r\n\t", false);
-        assert_eq!(
-            words,
-            vec!["abc", "网球", "拍卖会", "def", "！", "！", "？", "\r\n", "\t"]
-        );
+        let tokens = jieba.cut("abc网球拍卖会def！！？\r\n\t", false);
+        let words: Vec<&str> = tokens.iter().map(|t| t.word).collect();
+        expect![[r#"["abc", "网球", "拍卖会", "def", "！", "！", "？", "\r\n", "\t"]"#]]
+            .assert_eq(&format!("{:?}", words));
     }
 
     #[test]
     fn test_cut_with_hmm() {
         let jieba = Jieba::new();
-        let words = jieba.cut("我们中出了一个叛徒", false);
-        assert_eq!(words, vec!["我们", "中", "出", "了", "一个", "叛徒"]);
-        let words = jieba.cut("我们中出了一个叛徒", true);
-        assert_eq!(words, vec!["我们", "中出", "了", "一个", "叛徒"]);
-        let words = jieba.cut("我们中出了一个叛徒👪", true);
-        assert_eq!(words, vec!["我们", "中出", "了", "一个", "叛徒", "👪"]);
+        let tokens = jieba.cut("我们中出了一个叛徒", false);
+        let words: Vec<&str> = tokens.iter().map(|t| t.word).collect();
+        expect![[r#"["我们", "中", "出", "了", "一个", "叛徒"]"#]].assert_eq(&format!("{:?}", words));
+        let tokens = jieba.cut("我们中出了一个叛徒", true);
+        let words: Vec<&str> = tokens.iter().map(|t| t.word).collect();
+        expect![[r#"["我们", "中出", "了", "一个", "叛徒"]"#]].assert_eq(&format!("{:?}", words));
+        let tokens = jieba.cut("我们中出了一个叛徒👪", true);
+        let words: Vec<&str> = tokens.iter().map(|t| t.word).collect();
+        expect![[r#"["我们", "中出", "了", "一个", "叛徒", "👪"]"#]].assert_eq(&format!("{:?}", words));
 
-        let words = jieba.cut("我来到北京清华大学", true);
-        assert_eq!(words, vec!["我", "来到", "北京", "清华大学"]);
+        let tokens = jieba.cut("我来到北京清华大学", true);
+        let words: Vec<&str> = tokens.iter().map(|t| t.word).collect();
+        expect![[r#"["我", "来到", "北京", "清华大学"]"#]].assert_eq(&format!("{:?}", words));
 
-        let words = jieba.cut("他来到了网易杭研大厦", true);
-        assert_eq!(words, vec!["他", "来到", "了", "网易", "杭研", "大厦"]);
+        let tokens = jieba.cut("他来到了网易杭研大厦", true);
+        let words: Vec<&str> = tokens.iter().map(|t| t.word).collect();
+        expect![[r#"["他", "来到", "了", "网易", "杭研", "大厦"]"#]].assert_eq(&format!("{:?}", words));
     }
 
     #[test]
@@ -1051,37 +1095,17 @@ mod tests {
     #[test]
     fn test_cut_for_search() {
         let jieba = Jieba::new();
-        let words = jieba.cut_for_search("南京市长江大桥", true);
-        assert_eq!(words, vec!["南京", "京市", "南京市", "长江", "大桥", "长江大桥"]);
+        let tokens = jieba.cut_for_search("南京市长江大桥", true);
+        let words: Vec<&str> = tokens.iter().map(|t| t.word).collect();
+        expect![[r#"["南京", "京市", "南京市", "长江", "大桥", "长江大桥"]"#]].assert_eq(&format!("{:?}", words));
 
-        let words = jieba.cut_for_search("小明硕士毕业于中国科学院计算所，后在日本京都大学深造", true);
+        let tokens = jieba.cut_for_search("小明硕士毕业于中国科学院计算所，后在日本京都大学深造", true);
+        let words: Vec<&str> = tokens.iter().map(|t| t.word).collect();
 
         // The python implementation silently filtered "，". but we include it here in the output
         // to let the library user to decide their own filtering strategy
-        assert_eq!(
-            words,
-            vec![
-                "小明",
-                "硕士",
-                "毕业",
-                "于",
-                "中国",
-                "科学",
-                "学院",
-                "科学院",
-                "中国科学院",
-                "计算",
-                "计算所",
-                "，",
-                "后",
-                "在",
-                "日本",
-                "京都",
-                "大学",
-                "日本京都大学",
-                "深造"
-            ]
-        );
+        expect![[r#"["小明", "硕士", "毕业", "于", "中国", "科学", "学院", "科学院", "中国科学院", "计算", "计算所", "，", "后", "在", "日本", "京都", "大学", "日本京都大学", "深造"]"#]]
+            .assert_eq(&format!("{:?}", words));
     }
 
     #[test]
@@ -1091,409 +1115,758 @@ mod tests {
             "我是拖拉机学院手扶拖拉机专业的。不用多久，我就会升职加薪，当上CEO，走上人生巅峰。",
             true,
         );
-        assert_eq!(
-            tags,
-            vec![
-                Tag { word: "我", tag: "r" },
-                Tag { word: "是", tag: "v" },
+        expect![[r#"
+            [
                 Tag {
-                    word: "拖拉机",
-                    tag: "n"
+                    word: "我",
+                    tag: "r",
+                    start: 0,
+                    end: 1,
+                    byte_start: 0,
+                    byte_end: 3,
                 },
                 Tag {
-                    word: "学院", tag: "n"
+                    word: "是",
+                    tag: "v",
+                    start: 1,
+                    end: 2,
+                    byte_start: 3,
+                    byte_end: 6,
+                },
+                Tag {
+                    word: "拖拉机",
+                    tag: "n",
+                    start: 2,
+                    end: 5,
+                    byte_start: 6,
+                    byte_end: 15,
+                },
+                Tag {
+                    word: "学院",
+                    tag: "n",
+                    start: 5,
+                    end: 7,
+                    byte_start: 15,
+                    byte_end: 21,
                 },
                 Tag {
                     word: "手扶拖拉机",
-                    tag: "n"
+                    tag: "n",
+                    start: 7,
+                    end: 12,
+                    byte_start: 21,
+                    byte_end: 36,
                 },
                 Tag {
-                    word: "专业", tag: "n"
+                    word: "专业",
+                    tag: "n",
+                    start: 12,
+                    end: 14,
+                    byte_start: 36,
+                    byte_end: 42,
                 },
-                Tag { word: "的", tag: "uj" },
-                Tag { word: "。", tag: "x" },
                 Tag {
-                    word: "不用", tag: "v"
+                    word: "的",
+                    tag: "uj",
+                    start: 14,
+                    end: 15,
+                    byte_start: 42,
+                    byte_end: 45,
                 },
                 Tag {
-                    word: "多久", tag: "m"
+                    word: "。",
+                    tag: "x",
+                    start: 15,
+                    end: 16,
+                    byte_start: 45,
+                    byte_end: 48,
                 },
-                Tag { word: "，", tag: "x" },
-                Tag { word: "我", tag: "r" },
-                Tag { word: "就", tag: "d" },
-                Tag { word: "会", tag: "v" },
                 Tag {
-                    word: "升职", tag: "v"
+                    word: "不用",
+                    tag: "v",
+                    start: 16,
+                    end: 18,
+                    byte_start: 48,
+                    byte_end: 54,
+                },
+                Tag {
+                    word: "多久",
+                    tag: "m",
+                    start: 18,
+                    end: 20,
+                    byte_start: 54,
+                    byte_end: 60,
+                },
+                Tag {
+                    word: "，",
+                    tag: "x",
+                    start: 20,
+                    end: 21,
+                    byte_start: 60,
+                    byte_end: 63,
+                },
+                Tag {
+                    word: "我",
+                    tag: "r",
+                    start: 21,
+                    end: 22,
+                    byte_start: 63,
+                    byte_end: 66,
+                },
+                Tag {
+                    word: "就",
+                    tag: "d",
+                    start: 22,
+                    end: 23,
+                    byte_start: 66,
+                    byte_end: 69,
+                },
+                Tag {
+                    word: "会",
+                    tag: "v",
+                    start: 23,
+                    end: 24,
+                    byte_start: 69,
+                    byte_end: 72,
+                },
+                Tag {
+                    word: "升职",
+                    tag: "v",
+                    start: 24,
+                    end: 26,
+                    byte_start: 72,
+                    byte_end: 78,
                 },
                 Tag {
                     word: "加薪",
-                    tag: "nr"
+                    tag: "nr",
+                    start: 26,
+                    end: 28,
+                    byte_start: 78,
+                    byte_end: 84,
                 },
-                Tag { word: "，", tag: "x" },
                 Tag {
-                    word: "当上", tag: "t"
+                    word: "，",
+                    tag: "x",
+                    start: 28,
+                    end: 29,
+                    byte_start: 84,
+                    byte_end: 87,
+                },
+                Tag {
+                    word: "当上",
+                    tag: "t",
+                    start: 29,
+                    end: 31,
+                    byte_start: 87,
+                    byte_end: 93,
                 },
                 Tag {
                     word: "CEO",
-                    tag: "eng"
-                },
-                Tag { word: "，", tag: "x" },
-                Tag {
-                    word: "走上", tag: "v"
-                },
-                Tag {
-                    word: "人生", tag: "n"
+                    tag: "eng",
+                    start: 31,
+                    end: 34,
+                    byte_start: 93,
+                    byte_end: 96,
                 },
                 Tag {
-                    word: "巅峰", tag: "n"
+                    word: "，",
+                    tag: "x",
+                    start: 34,
+                    end: 35,
+                    byte_start: 96,
+                    byte_end: 99,
                 },
-                Tag { word: "。", tag: "x" }
-            ]
-        );
+                Tag {
+                    word: "走上",
+                    tag: "v",
+                    start: 35,
+                    end: 37,
+                    byte_start: 99,
+                    byte_end: 105,
+                },
+                Tag {
+                    word: "人生",
+                    tag: "n",
+                    start: 37,
+                    end: 39,
+                    byte_start: 105,
+                    byte_end: 111,
+                },
+                Tag {
+                    word: "巅峰",
+                    tag: "n",
+                    start: 39,
+                    end: 41,
+                    byte_start: 111,
+                    byte_end: 117,
+                },
+                Tag {
+                    word: "。",
+                    tag: "x",
+                    start: 41,
+                    end: 42,
+                    byte_start: 117,
+                    byte_end: 120,
+                },
+            ]"#]]
+        .assert_eq(&format!("{:#?}", tags));
 
         let tags = jieba.tag("今天纽约的天气真好啊，京华大酒店的张尧经理吃了一只北京烤鸭。", true);
-        assert_eq!(
-            tags,
-            vec![
+        expect![[r#"
+            [
                 Tag {
-                    word: "今天", tag: "t"
+                    word: "今天",
+                    tag: "t",
+                    start: 0,
+                    end: 2,
+                    byte_start: 0,
+                    byte_end: 6,
                 },
                 Tag {
                     word: "纽约",
-                    tag: "ns"
+                    tag: "ns",
+                    start: 2,
+                    end: 4,
+                    byte_start: 6,
+                    byte_end: 12,
                 },
-                Tag { word: "的", tag: "uj" },
                 Tag {
-                    word: "天气", tag: "n"
+                    word: "的",
+                    tag: "uj",
+                    start: 4,
+                    end: 5,
+                    byte_start: 12,
+                    byte_end: 15,
                 },
                 Tag {
-                    word: "真好", tag: "d"
+                    word: "天气",
+                    tag: "n",
+                    start: 5,
+                    end: 7,
+                    byte_start: 15,
+                    byte_end: 21,
                 },
-                Tag { word: "啊", tag: "zg" },
-                Tag { word: "，", tag: "x" },
+                Tag {
+                    word: "真好",
+                    tag: "d",
+                    start: 7,
+                    end: 9,
+                    byte_start: 21,
+                    byte_end: 27,
+                },
+                Tag {
+                    word: "啊",
+                    tag: "zg",
+                    start: 9,
+                    end: 10,
+                    byte_start: 27,
+                    byte_end: 30,
+                },
+                Tag {
+                    word: "，",
+                    tag: "x",
+                    start: 10,
+                    end: 11,
+                    byte_start: 30,
+                    byte_end: 33,
+                },
                 Tag {
                     word: "京华",
-                    tag: "nz"
+                    tag: "nz",
+                    start: 11,
+                    end: 13,
+                    byte_start: 33,
+                    byte_end: 39,
                 },
                 Tag {
                     word: "大酒店",
-                    tag: "n"
+                    tag: "n",
+                    start: 13,
+                    end: 16,
+                    byte_start: 39,
+                    byte_end: 48,
                 },
-                Tag { word: "的", tag: "uj" },
                 Tag {
-                    word: "张尧", tag: "x"
-                }, // XXX: missing in dict
-                Tag {
-                    word: "经理", tag: "n"
+                    word: "的",
+                    tag: "uj",
+                    start: 16,
+                    end: 17,
+                    byte_start: 48,
+                    byte_end: 51,
                 },
-                Tag { word: "吃", tag: "v" },
-                Tag { word: "了", tag: "ul" },
                 Tag {
-                    word: "一只", tag: "m"
+                    word: "张尧",
+                    tag: "x",
+                    start: 17,
+                    end: 19,
+                    byte_start: 51,
+                    byte_end: 57,
+                },
+                Tag {
+                    word: "经理",
+                    tag: "n",
+                    start: 19,
+                    end: 21,
+                    byte_start: 57,
+                    byte_end: 63,
+                },
+                Tag {
+                    word: "吃",
+                    tag: "v",
+                    start: 21,
+                    end: 22,
+                    byte_start: 63,
+                    byte_end: 66,
+                },
+                Tag {
+                    word: "了",
+                    tag: "ul",
+                    start: 22,
+                    end: 23,
+                    byte_start: 66,
+                    byte_end: 69,
+                },
+                Tag {
+                    word: "一只",
+                    tag: "m",
+                    start: 23,
+                    end: 25,
+                    byte_start: 69,
+                    byte_end: 75,
                 },
                 Tag {
                     word: "北京烤鸭",
-                    tag: "n"
+                    tag: "n",
+                    start: 25,
+                    end: 29,
+                    byte_start: 75,
+                    byte_end: 87,
                 },
-                Tag { word: "。", tag: "x" }
-            ]
-        );
+                Tag {
+                    word: "。",
+                    tag: "x",
+                    start: 29,
+                    end: 30,
+                    byte_start: 87,
+                    byte_end: 90,
+                },
+            ]"#]]
+        .assert_eq(&format!("{:#?}", tags));
     }
 
     #[test]
     fn test_tokenize() {
         let jieba = Jieba::new();
         let tokens = jieba.tokenize("南京市长江大桥", TokenizeMode::Default, false);
-        assert_eq!(
-            tokens,
-            vec![
+        expect![[r#"
+            [
                 Token {
                     word: "南京市",
                     start: 0,
-                    end: 3
+                    end: 3,
+                    byte_start: 0,
+                    byte_end: 9,
                 },
                 Token {
                     word: "长江大桥",
                     start: 3,
-                    end: 7
-                }
-            ]
-        );
+                    end: 7,
+                    byte_start: 9,
+                    byte_end: 21,
+                },
+            ]"#]]
+        .assert_eq(&format!("{:#?}", tokens));
 
         let tokens = jieba.tokenize("南京市长江大桥", TokenizeMode::Search, false);
-        assert_eq!(
-            tokens,
-            vec![
+        expect![[r#"
+            [
                 Token {
                     word: "南京",
                     start: 0,
-                    end: 2
+                    end: 2,
+                    byte_start: 0,
+                    byte_end: 6,
                 },
                 Token {
                     word: "京市",
                     start: 1,
-                    end: 3
+                    end: 3,
+                    byte_start: 3,
+                    byte_end: 9,
                 },
                 Token {
                     word: "南京市",
                     start: 0,
-                    end: 3
+                    end: 3,
+                    byte_start: 0,
+                    byte_end: 9,
                 },
                 Token {
                     word: "长江",
                     start: 3,
-                    end: 5
+                    end: 5,
+                    byte_start: 9,
+                    byte_end: 15,
                 },
                 Token {
                     word: "大桥",
                     start: 5,
-                    end: 7
+                    end: 7,
+                    byte_start: 15,
+                    byte_end: 21,
                 },
                 Token {
                     word: "长江大桥",
                     start: 3,
-                    end: 7
-                }
-            ]
-        );
+                    end: 7,
+                    byte_start: 9,
+                    byte_end: 21,
+                },
+            ]"#]]
+        .assert_eq(&format!("{:#?}", tokens));
 
         let tokens = jieba.tokenize("我们中出了一个叛徒", TokenizeMode::Default, false);
-        assert_eq!(
-            tokens,
-            vec![
+        expect![[r#"
+            [
                 Token {
                     word: "我们",
                     start: 0,
-                    end: 2
+                    end: 2,
+                    byte_start: 0,
+                    byte_end: 6,
                 },
                 Token {
                     word: "中",
                     start: 2,
-                    end: 3
+                    end: 3,
+                    byte_start: 6,
+                    byte_end: 9,
                 },
                 Token {
                     word: "出",
                     start: 3,
-                    end: 4
+                    end: 4,
+                    byte_start: 9,
+                    byte_end: 12,
                 },
                 Token {
                     word: "了",
                     start: 4,
-                    end: 5
+                    end: 5,
+                    byte_start: 12,
+                    byte_end: 15,
                 },
                 Token {
                     word: "一个",
                     start: 5,
-                    end: 7
+                    end: 7,
+                    byte_start: 15,
+                    byte_end: 21,
                 },
                 Token {
                     word: "叛徒",
                     start: 7,
-                    end: 9
-                }
-            ]
-        );
+                    end: 9,
+                    byte_start: 21,
+                    byte_end: 27,
+                },
+            ]"#]]
+        .assert_eq(&format!("{:#?}", tokens));
         let tokens = jieba.tokenize("我们中出了一个叛徒", TokenizeMode::Default, true);
-        assert_eq!(
-            tokens,
-            vec![
+        expect![[r#"
+            [
                 Token {
                     word: "我们",
                     start: 0,
-                    end: 2
+                    end: 2,
+                    byte_start: 0,
+                    byte_end: 6,
                 },
                 Token {
                     word: "中出",
                     start: 2,
-                    end: 4
+                    end: 4,
+                    byte_start: 6,
+                    byte_end: 12,
                 },
                 Token {
                     word: "了",
                     start: 4,
-                    end: 5
+                    end: 5,
+                    byte_start: 12,
+                    byte_end: 15,
                 },
                 Token {
                     word: "一个",
                     start: 5,
-                    end: 7
+                    end: 7,
+                    byte_start: 15,
+                    byte_end: 21,
                 },
                 Token {
                     word: "叛徒",
                     start: 7,
-                    end: 9
-                }
-            ]
-        );
+                    end: 9,
+                    byte_start: 21,
+                    byte_end: 27,
+                },
+            ]"#]]
+        .assert_eq(&format!("{:#?}", tokens));
 
         let tokens = jieba.tokenize("永和服装饰品有限公司", TokenizeMode::Default, true);
-        assert_eq!(
-            tokens,
-            vec![
+        expect![[r#"
+            [
                 Token {
                     word: "永和",
                     start: 0,
-                    end: 2
+                    end: 2,
+                    byte_start: 0,
+                    byte_end: 6,
                 },
                 Token {
                     word: "服装",
                     start: 2,
-                    end: 4
+                    end: 4,
+                    byte_start: 6,
+                    byte_end: 12,
                 },
                 Token {
                     word: "饰品",
                     start: 4,
-                    end: 6
+                    end: 6,
+                    byte_start: 12,
+                    byte_end: 18,
                 },
                 Token {
                     word: "有限公司",
                     start: 6,
-                    end: 10
-                }
-            ]
-        );
+                    end: 10,
+                    byte_start: 18,
+                    byte_end: 30,
+                },
+            ]"#]]
+        .assert_eq(&format!("{:#?}", tokens));
     }
 
     #[test]
     fn test_userdict() {
         let mut jieba = Jieba::new();
         let tokens = jieba.tokenize("我们中出了一个叛徒", TokenizeMode::Default, false);
-        assert_eq!(
-            tokens,
-            vec![
+        expect![[r#"
+            [
                 Token {
                     word: "我们",
                     start: 0,
-                    end: 2
+                    end: 2,
+                    byte_start: 0,
+                    byte_end: 6,
                 },
                 Token {
                     word: "中",
                     start: 2,
-                    end: 3
+                    end: 3,
+                    byte_start: 6,
+                    byte_end: 9,
                 },
                 Token {
                     word: "出",
                     start: 3,
-                    end: 4
+                    end: 4,
+                    byte_start: 9,
+                    byte_end: 12,
                 },
                 Token {
                     word: "了",
                     start: 4,
-                    end: 5
+                    end: 5,
+                    byte_start: 12,
+                    byte_end: 15,
                 },
                 Token {
                     word: "一个",
                     start: 5,
-                    end: 7
+                    end: 7,
+                    byte_start: 15,
+                    byte_end: 21,
                 },
                 Token {
                     word: "叛徒",
                     start: 7,
-                    end: 9
-                }
-            ]
-        );
+                    end: 9,
+                    byte_start: 21,
+                    byte_end: 27,
+                },
+            ]"#]]
+        .assert_eq(&format!("{:#?}", tokens));
         let userdict = "中出 10000";
         jieba.load_dict(&mut BufReader::new(userdict.as_bytes())).unwrap();
         let tokens = jieba.tokenize("我们中出了一个叛徒", TokenizeMode::Default, false);
-        assert_eq!(
-            tokens,
-            vec![
+        expect![[r#"
+            [
                 Token {
                     word: "我们",
                     start: 0,
-                    end: 2
+                    end: 2,
+                    byte_start: 0,
+                    byte_end: 6,
                 },
                 Token {
                     word: "中出",
                     start: 2,
-                    end: 4
+                    end: 4,
+                    byte_start: 6,
+                    byte_end: 12,
                 },
                 Token {
                     word: "了",
                     start: 4,
-                    end: 5
+                    end: 5,
+                    byte_start: 12,
+                    byte_end: 15,
                 },
                 Token {
                     word: "一个",
                     start: 5,
-                    end: 7
+                    end: 7,
+                    byte_start: 15,
+                    byte_end: 21,
                 },
                 Token {
                     word: "叛徒",
                     start: 7,
-                    end: 9
-                }
-            ]
-        );
+                    end: 9,
+                    byte_start: 21,
+                    byte_end: 27,
+                },
+            ]"#]]
+        .assert_eq(&format!("{:#?}", tokens));
     }
 
     #[test]
     fn test_userdict_hmm() {
         let mut jieba = Jieba::new();
         let tokens = jieba.tokenize("我们中出了一个叛徒", TokenizeMode::Default, true);
-        assert_eq!(
-            tokens,
-            vec![
+        expect![[r#"
+            [
                 Token {
                     word: "我们",
                     start: 0,
-                    end: 2
+                    end: 2,
+                    byte_start: 0,
+                    byte_end: 6,
                 },
                 Token {
                     word: "中出",
                     start: 2,
-                    end: 4
+                    end: 4,
+                    byte_start: 6,
+                    byte_end: 12,
                 },
                 Token {
                     word: "了",
                     start: 4,
-                    end: 5
+                    end: 5,
+                    byte_start: 12,
+                    byte_end: 15,
                 },
                 Token {
                     word: "一个",
                     start: 5,
-                    end: 7
+                    end: 7,
+                    byte_start: 15,
+                    byte_end: 21,
                 },
                 Token {
                     word: "叛徒",
                     start: 7,
-                    end: 9
-                }
-            ]
-        );
+                    end: 9,
+                    byte_start: 21,
+                    byte_end: 27,
+                },
+            ]"#]]
+        .assert_eq(&format!("{:#?}", tokens));
         let userdict = "出了 10000";
         jieba.load_dict(&mut BufReader::new(userdict.as_bytes())).unwrap();
         let tokens = jieba.tokenize("我们中出了一个叛徒", TokenizeMode::Default, true);
-        assert_eq!(
-            tokens,
-            vec![
+        expect![[r#"
+            [
                 Token {
                     word: "我们",
                     start: 0,
-                    end: 2
+                    end: 2,
+                    byte_start: 0,
+                    byte_end: 6,
                 },
                 Token {
                     word: "中",
                     start: 2,
-                    end: 3
+                    end: 3,
+                    byte_start: 6,
+                    byte_end: 9,
                 },
                 Token {
                     word: "出了",
                     start: 3,
-                    end: 5
+                    end: 5,
+                    byte_start: 9,
+                    byte_end: 15,
                 },
                 Token {
                     word: "一个",
                     start: 5,
-                    end: 7
+                    end: 7,
+                    byte_start: 15,
+                    byte_end: 21,
                 },
                 Token {
                     word: "叛徒",
                     start: 7,
-                    end: 9
-                }
-            ]
-        );
+                    end: 9,
+                    byte_start: 21,
+                    byte_end: 27,
+                },
+            ]"#]]
+        .assert_eq(&format!("{:#?}", tokens));
+        expect![[r#"
+            [
+                Token {
+                    word: "我们",
+                    start: 0,
+                    end: 2,
+                    byte_start: 0,
+                    byte_end: 6,
+                },
+                Token {
+                    word: "中",
+                    start: 2,
+                    end: 3,
+                    byte_start: 6,
+                    byte_end: 9,
+                },
+                Token {
+                    word: "出了",
+                    start: 3,
+                    end: 5,
+                    byte_start: 9,
+                    byte_end: 15,
+                },
+                Token {
+                    word: "一个",
+                    start: 5,
+                    end: 7,
+                    byte_start: 15,
+                    byte_end: 21,
+                },
+                Token {
+                    word: "叛徒",
+                    start: 7,
+                    end: 9,
+                    byte_start: 21,
+                    byte_end: 27,
+                },
+            ]"#]]
+        .assert_eq(&format!("{:#?}", tokens));
     }
 
     #[test]
@@ -1531,8 +1904,9 @@ mod tests {
 
         jieba.add_word("测试", Some(2445), None);
         jieba.add_word("测试", Some(10), None);
-        let words = jieba.cut("测试", false);
-        assert_eq!(words, vec!["测试"]);
+        let tokens = jieba.cut("测试", false);
+        let words: Vec<&str> = tokens.iter().map(|t| t.word).collect();
+        expect![[r#"["测试"]"#]].assert_eq(&format!("{:?}", words));
     }
 
     #[test]
@@ -1543,16 +1917,18 @@ mod tests {
         jieba.add_word("䶴䶵𦡦", Some(1000), None);
         jieba.add_word("讥䶯䶰䶱䶲䶳", Some(1000), None);
 
-        let words = jieba.cut("讥䶯䶰䶱䶲䶳䶴䶵𦡦", false);
-        assert_eq!(words, vec!["讥䶯䶰䶱䶲䶳", "䶴䶵𦡦"]);
+        let tokens = jieba.cut("讥䶯䶰䶱䶲䶳䶴䶵𦡦", false);
+        let words: Vec<&str> = tokens.iter().map(|t| t.word).collect();
+        expect![[r#"["讥䶯䶰䶱䶲䶳", "䶴䶵𦡦"]"#]].assert_eq(&format!("{:?}", words));
     }
 
     #[test]
     fn test_add_custom_word_with_underscrore() {
         let mut jieba = Jieba::empty();
         jieba.add_word("田-女士", Some(42), Some("n"));
-        let words = jieba.cut("市民田-女士急匆匆", false);
-        assert_eq!(words, vec!["市", "民", "田-女士", "急", "匆", "匆"]);
+        let tokens = jieba.cut("市民田-女士急匆匆", false);
+        let words: Vec<&str> = tokens.iter().map(|t| t.word).collect();
+        expect![[r#"["市", "民", "田-女士", "急", "匆", "匆"]"#]].assert_eq(&format!("{:?}", words));
     }
 
     #[test]
