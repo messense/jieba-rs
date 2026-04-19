@@ -196,7 +196,10 @@ pub unsafe extern "C" fn jieba_cut(
     // FIXME: remove allocation
     let s = String::from_utf8_lossy(c_str.as_bytes_full());
     let words = jieba.cut(&s, hmm);
-    let mut c_words: Vec<FfiStr> = words.into_iter().map(|x| FfiStr::from_string(x.to_string())).collect();
+    let mut c_words: Vec<FfiStr> = words
+        .into_iter()
+        .map(|x| FfiStr::from_string(x.word.to_string()))
+        .collect();
     let words_len = c_words.len();
     let ptr = c_words.as_mut_ptr();
     mem::forget(c_words);
@@ -214,7 +217,10 @@ pub unsafe extern "C" fn jieba_cut_all(cjieba: *mut CJieba, sentence: *const c_c
     // FIXME: remove allocation
     let s = String::from_utf8_lossy(c_str.as_bytes_full());
     let words = (*jieba).cut_all(&s);
-    let mut c_words: Vec<FfiStr> = words.into_iter().map(|x| FfiStr::from_string(x.to_string())).collect();
+    let mut c_words: Vec<FfiStr> = words
+        .into_iter()
+        .map(|x| FfiStr::from_string(x.word.to_string()))
+        .collect();
     let words_len = c_words.len();
     let ptr = c_words.as_mut_ptr();
     mem::forget(c_words);
@@ -237,7 +243,10 @@ pub unsafe extern "C" fn jieba_cut_for_search(
     // FIXME: remove allocation
     let s = String::from_utf8_lossy(c_str.as_bytes_full());
     let words = (*jieba).cut_for_search(&s, hmm);
-    let mut c_words: Vec<FfiStr> = words.into_iter().map(|x| FfiStr::from_string(x.to_string())).collect();
+    let mut c_words: Vec<FfiStr> = words
+        .into_iter()
+        .map(|x| FfiStr::from_string(x.word.to_string()))
+        .collect();
     let words_len = c_words.len();
     let ptr = c_words.as_mut_ptr();
     mem::forget(c_words);

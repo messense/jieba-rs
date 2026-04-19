@@ -18,6 +18,7 @@
 //!
 //! let jieba = Jieba::new();
 //! let words = jieba.cut("我们中出了一个叛徒", false);
+//! let words: Vec<&str> = words.iter().map(|t| t.word).collect();
 //! assert_eq!(words, vec!["我们", "中", "出", "了", "一个", "叛徒"]);
 //! ```
 //!
@@ -198,6 +199,10 @@ pub struct Token<'a> {
     pub start: usize,
     /// Unicode end position of the token
     pub end: usize,
+    /// Byte start position of the token in the original input
+    pub byte_start: usize,
+    /// Byte end position of the token in the original input
+    pub byte_end: usize,
 }
 
 /// A tagged word
@@ -207,6 +212,14 @@ pub struct Tag<'a> {
     pub word: &'a str,
     /// Word tag
     pub tag: &'a str,
+    /// Unicode start position of the word in the original input
+    pub start: usize,
+    /// Unicode end position of the word in the original input
+    pub end: usize,
+    /// Byte start position of the word in the original input
+    pub byte_start: usize,
+    /// Byte end position of the word in the original input
+    pub byte_end: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -472,8 +485,8 @@ impl Jieba {
     /// Suggest word frequency to force the characters in a word to be joined or split.
     pub fn suggest_freq(&self, segment: &str) -> usize {
         let logtotal = (self.total as f64).ln();
-        let logfreq = self.cut(segment, false).iter().fold(0f64, |freq, word| {
-            freq + (self.get_word_freq(word, 1) as f64).ln() - logtotal
+        let logfreq = self.cut(segment, false).iter().fold(0f64, |freq, token| {
+            freq + (self.get_word_freq(token.word, 1) as f64).ln() - logtotal
         });
         std::cmp::max((logfreq + logtotal).exp() as usize + 1, self.get_word_freq(segment, 1))
     }
@@ -667,15 +680,83 @@ impl Jieba {
         route.clear();
     }
 
+    /// Build a byte-offset to unicode-offset lookup table for the given string.
+    /// Only char-boundary byte offsets (and the final offset at `s.len()`) are populated.
+    /// Used only for cut_all where tokens overlap.
+    fn byte_to_unicode_table(s: &str) -> Vec<usize> {
+        let mut table = vec![0usize; s.len() + 1];
+        let mut unicode_pos = 0;
+        for (byte_pos, _) in s.char_indices() {
+            table[byte_pos] = unicode_pos;
+            unicode_pos += 1;
+        }
+        table[s.len()] = unicode_pos;
+        table
+    }
+
+    /// Create a Token from a word slice, computing positions from the lookup table.
+    /// `word` must be a subslice of the sentence that `base` and `b2u` were derived from.
+    #[inline]
+    fn make_token<'a>(word: &'a str, sentence: &str, base: usize, b2u: &[usize]) -> Token<'a> {
+        let ptr = word.as_ptr() as usize;
+        debug_assert!(ptr >= base, "word is not a subslice of sentence");
+        let byte_start = ptr - base;
+        let byte_end = byte_start + word.len();
+        debug_assert!(byte_end <= sentence.len(), "word extends beyond sentence");
+        debug_assert!(
+            sentence.is_char_boundary(byte_start),
+            "byte_start is not a char boundary"
+        );
+        debug_assert!(sentence.is_char_boundary(byte_end), "byte_end is not a char boundary");
+        Token {
+            word,
+            start: b2u[byte_start],
+            end: b2u[byte_end],
+            byte_start,
+            byte_end,
+        }
+    }
+
+    /// Create a Token with incrementally tracked unicode offset.
+    /// Returns the updated unicode_offset (past the end of this token).
+    #[inline]
+    fn make_token_incremental<'a>(word: &'a str, base: usize, unicode_offset: &mut usize) -> Token<'a> {
+        let ptr = word.as_ptr() as usize;
+        debug_assert!(ptr >= base, "word is not a subslice of sentence");
+        let byte_start = ptr - base;
+        let byte_end = byte_start + word.len();
+        let start = *unicode_offset;
+        // Count UTF-8 leading bytes to get char count without allocating
+        let char_count = word.as_bytes().iter().filter(|&&b| (b as i8) >= -0x40).count();
+        *unicode_offset = start + char_count;
+        Token {
+            word,
+            start,
+            end: *unicode_offset,
+            byte_start,
+            byte_end,
+        }
+    }
+
     #[allow(non_snake_case)]
-    fn cut_internal<'a>(&self, sentence: &'a str, cut_all: bool, hmm: bool) -> Vec<&'a str> {
+    fn cut_internal<'a>(&self, sentence: &'a str, cut_all: bool, hmm: bool) -> Vec<Token<'a>> {
         let re_han = if cut_all { &RE_HAN_CUT_ALL } else { &RE_HAN_DEFAULT };
         let re_skip = if cut_all { &RE_SKIP_CUT_ALL } else { &RE_SKIP_DEFAULT };
+        let base = sentence.as_ptr() as usize;
+        // Only allocate the lookup table for cut_all (overlapping tokens).
+        // For cut/cut_for_search, tokens are contiguous so we track unicode offset incrementally.
+        let b2u = if cut_all {
+            Self::byte_to_unicode_table(sentence)
+        } else {
+            Vec::new()
+        };
+        let mut unicode_offset = 0;
 
         re_han.with(|re_han| {
             re_skip.with(|re_skip| {
                 let heuristic_capacity = sentence.len() / 2;
-                let mut words = Vec::with_capacity(heuristic_capacity);
+                let mut str_words = Vec::with_capacity(heuristic_capacity);
+                let mut tokens = Vec::with_capacity(heuristic_capacity);
 
                 let splitter = SplitMatches::new(re_han, sentence);
                 let mut route = Vec::with_capacity(heuristic_capacity);
@@ -687,15 +768,23 @@ impl Jieba {
                             let block = state.as_str();
                             assert!(!block.is_empty());
 
+                            str_words.clear();
                             if cut_all {
-                                self.cut_all_internal(block, &mut words);
+                                self.cut_all_internal(block, &mut str_words);
                             } else if hmm {
                                 HMM_CONTEXT.with(|ctx| {
                                     let mut hmm_context = ctx.borrow_mut();
-                                    self.cut_dag_hmm(block, &mut words, &mut route, &mut dag, &mut hmm_context);
+                                    self.cut_dag_hmm(block, &mut str_words, &mut route, &mut dag, &mut hmm_context);
                                 });
                             } else {
-                                self.cut_dag_no_hmm(block, &mut words, &mut route, &mut dag);
+                                self.cut_dag_no_hmm(block, &mut str_words, &mut route, &mut dag);
+                            }
+                            for &word in &str_words {
+                                if cut_all {
+                                    tokens.push(Self::make_token(word, sentence, base, &b2u));
+                                } else {
+                                    tokens.push(Self::make_token_incremental(word, base, &mut unicode_offset));
+                                }
                             }
                         }
                         SplitState::Unmatched(_) => {
@@ -709,14 +798,23 @@ impl Jieba {
                                     continue;
                                 }
                                 if cut_all || skip_state.is_matched() {
-                                    words.push(word);
+                                    if cut_all {
+                                        tokens.push(Self::make_token(word, sentence, base, &b2u));
+                                    } else {
+                                        tokens.push(Self::make_token_incremental(word, base, &mut unicode_offset));
+                                    }
                                 } else {
                                     let mut word_indices = word.char_indices().map(|x| x.0).peekable();
-                                    while let Some(byte_start) = word_indices.next() {
-                                        if let Some(byte_end) = word_indices.peek() {
-                                            words.push(&word[byte_start..*byte_end]);
+                                    while let Some(local_start) = word_indices.next() {
+                                        let ch = if let Some(&local_end) = word_indices.peek() {
+                                            &word[local_start..local_end]
                                         } else {
-                                            words.push(&word[byte_start..]);
+                                            &word[local_start..]
+                                        };
+                                        if cut_all {
+                                            tokens.push(Self::make_token(ch, sentence, base, &b2u));
+                                        } else {
+                                            tokens.push(Self::make_token_incremental(ch, base, &mut unicode_offset));
                                         }
                                     }
                                 }
@@ -724,7 +822,7 @@ impl Jieba {
                         }
                     }
                 }
-                words
+                tokens
             })
         })
     }
@@ -736,7 +834,7 @@ impl Jieba {
     /// `sentence`: input text
     ///
     /// `hmm`: enable HMM or not
-    pub fn cut<'a>(&self, sentence: &'a str, hmm: bool) -> Vec<&'a str> {
+    pub fn cut<'a>(&self, sentence: &'a str, hmm: bool) -> Vec<Token<'a>> {
         self.cut_internal(sentence, false, hmm)
     }
 
@@ -745,7 +843,7 @@ impl Jieba {
     /// ## Params
     ///
     /// `sentence`: input text
-    pub fn cut_all<'a>(&self, sentence: &'a str) -> Vec<&'a str> {
+    pub fn cut_all<'a>(&self, sentence: &'a str) -> Vec<Token<'a>> {
         self.cut_internal(sentence, true, false)
     }
 
@@ -756,39 +854,57 @@ impl Jieba {
     /// `sentence`: input text
     ///
     /// `hmm`: enable HMM or not
-    pub fn cut_for_search<'a>(&self, sentence: &'a str, hmm: bool) -> Vec<&'a str> {
+    pub fn cut_for_search<'a>(&self, sentence: &'a str, hmm: bool) -> Vec<Token<'a>> {
         let words = self.cut(sentence, hmm);
         let mut new_words = Vec::with_capacity(words.len());
-        for word in words {
+        let base = sentence.as_ptr() as usize;
+        for token in words {
+            let word = token.word;
             let char_indices: Vec<usize> = word.char_indices().map(|x| x.0).collect();
             let char_count = char_indices.len();
             if char_count > 2 {
                 for i in 0..char_count - 1 {
-                    let byte_start = char_indices[i];
+                    let local_byte_start = char_indices[i];
                     let gram2 = if i + 2 < char_count {
-                        &word[byte_start..char_indices[i + 2]]
+                        &word[local_byte_start..char_indices[i + 2]]
                     } else {
-                        &word[byte_start..]
+                        &word[local_byte_start..]
                     };
                     if self.cedar.exact_match_search(gram2).is_some() {
-                        new_words.push(gram2);
+                        let byte_start = gram2.as_ptr() as usize - base;
+                        let byte_end = byte_start + gram2.len();
+                        new_words.push(Token {
+                            word: gram2,
+                            start: token.start + i,
+                            end: token.start + i + 2,
+                            byte_start,
+                            byte_end,
+                        });
                     }
                 }
             }
             if char_count > 3 {
                 for i in 0..char_count - 2 {
-                    let byte_start = char_indices[i];
+                    let local_byte_start = char_indices[i];
                     let gram3 = if i + 3 < char_count {
-                        &word[byte_start..char_indices[i + 3]]
+                        &word[local_byte_start..char_indices[i + 3]]
                     } else {
-                        &word[byte_start..]
+                        &word[local_byte_start..]
                     };
                     if self.cedar.exact_match_search(gram3).is_some() {
-                        new_words.push(gram3);
+                        let byte_start = gram3.as_ptr() as usize - base;
+                        let byte_end = byte_start + gram3.len();
+                        new_words.push(Token {
+                            word: gram3,
+                            start: token.start + i,
+                            end: token.start + i + 3,
+                            byte_start,
+                            byte_end,
+                        });
                     }
                 }
             }
-            new_words.push(word);
+            new_words.push(token);
         }
         new_words
     }
@@ -803,69 +919,10 @@ impl Jieba {
     ///
     /// `hmm`: enable HMM or not
     pub fn tokenize<'a>(&self, sentence: &'a str, mode: TokenizeMode, hmm: bool) -> Vec<Token<'a>> {
-        let words = self.cut(sentence, hmm);
-        let mut tokens = Vec::with_capacity(words.len());
-        let mut start = 0;
         match mode {
-            TokenizeMode::Default => {
-                for word in words {
-                    let width = word.chars().count();
-                    tokens.push(Token {
-                        word,
-                        start,
-                        end: start + width,
-                    });
-                    start += width;
-                }
-            }
-            TokenizeMode::Search => {
-                for word in words {
-                    let width = word.chars().count();
-                    if width > 2 {
-                        let char_indices: Vec<usize> = word.char_indices().map(|x| x.0).collect();
-                        for i in 0..width - 1 {
-                            let byte_start = char_indices[i];
-                            let gram2 = if i + 2 < width {
-                                &word[byte_start..char_indices[i + 2]]
-                            } else {
-                                &word[byte_start..]
-                            };
-                            if self.cedar.exact_match_search(gram2).is_some() {
-                                tokens.push(Token {
-                                    word: gram2,
-                                    start: start + i,
-                                    end: start + i + 2,
-                                });
-                            }
-                        }
-                        if width > 3 {
-                            for i in 0..width - 2 {
-                                let byte_start = char_indices[i];
-                                let gram3 = if i + 3 < width {
-                                    &word[byte_start..char_indices[i + 3]]
-                                } else {
-                                    &word[byte_start..]
-                                };
-                                if self.cedar.exact_match_search(gram3).is_some() {
-                                    tokens.push(Token {
-                                        word: gram3,
-                                        start: start + i,
-                                        end: start + i + 3,
-                                    });
-                                }
-                            }
-                        }
-                    }
-                    tokens.push(Token {
-                        word,
-                        start,
-                        end: start + width,
-                    });
-                    start += width;
-                }
-            }
+            TokenizeMode::Default => self.cut(sentence, hmm),
+            TokenizeMode::Search => self.cut_for_search(sentence, hmm),
         }
-        tokens
     }
 
     /// Tag the input text
@@ -876,13 +933,21 @@ impl Jieba {
     ///
     /// `hmm`: enable HMM or not
     pub fn tag<'a>(&'a self, sentence: &'a str, hmm: bool) -> Vec<Tag<'a>> {
-        let words = self.cut(sentence, hmm);
-        words
+        let tokens = self.cut(sentence, hmm);
+        tokens
             .into_iter()
-            .map(|word| {
+            .map(|token| {
+                let word = token.word;
                 if let Some((word_id, _, _)) = self.cedar.exact_match_search(word) {
                     let t = &self.records[word_id as usize].tag;
-                    return Tag { word, tag: t };
+                    return Tag {
+                        word,
+                        tag: t,
+                        start: token.start,
+                        end: token.end,
+                        byte_start: token.byte_start,
+                        byte_end: token.byte_end,
+                    };
                 }
                 let mut eng = 0;
                 let mut m = 0;
@@ -901,7 +966,14 @@ impl Jieba {
                 } else {
                     "eng"
                 };
-                Tag { word, tag }
+                Tag {
+                    word,
+                    tag,
+                    start: token.start,
+                    end: token.end,
+                    byte_start: token.byte_start,
+                    byte_end: token.byte_end,
+                }
             })
             .collect()
     }
@@ -960,7 +1032,8 @@ mod tests {
     #[test]
     fn test_cut_all() {
         let jieba = Jieba::new();
-        let words = jieba.cut_all("abc网球拍卖会def");
+        let tokens = jieba.cut_all("abc网球拍卖会def");
+        let words: Vec<&str> = tokens.iter().map(|t| t.word).collect();
         assert_eq!(
             words,
             vec![
@@ -982,7 +1055,8 @@ mod tests {
         // The cut_all from the python de-facto implementation is loosely defined,
         // And the answer "我, 来到, 北京, 清华, 清华大学, 华大, 大学" from the python implementation looks weird since it drops the single character word even though it is part of the DAG candidates.
         // For example, it includes "华大" but it doesn't include "清" and "学"
-        let words = jieba.cut_all("我来到北京清华大学");
+        let tokens = jieba.cut_all("我来到北京清华大学");
+        let words: Vec<&str> = tokens.iter().map(|t| t.word).collect();
         assert_eq!(
             words,
             vec![
@@ -1008,14 +1082,16 @@ mod tests {
     #[test]
     fn test_cut_no_hmm() {
         let jieba = Jieba::new();
-        let words = jieba.cut("abc网球拍卖会def", false);
+        let tokens = jieba.cut("abc网球拍卖会def", false);
+        let words: Vec<&str> = tokens.iter().map(|t| t.word).collect();
         assert_eq!(words, vec!["abc", "网球", "拍卖会", "def"]);
     }
 
     #[test]
     fn test_cut_no_hmm1() {
         let jieba = Jieba::new();
-        let words = jieba.cut("abc网球拍卖会def！！？\r\n\t", false);
+        let tokens = jieba.cut("abc网球拍卖会def！！？\r\n\t", false);
+        let words: Vec<&str> = tokens.iter().map(|t| t.word).collect();
         assert_eq!(
             words,
             vec!["abc", "网球", "拍卖会", "def", "！", "！", "？", "\r\n", "\t"]
@@ -1025,17 +1101,22 @@ mod tests {
     #[test]
     fn test_cut_with_hmm() {
         let jieba = Jieba::new();
-        let words = jieba.cut("我们中出了一个叛徒", false);
+        let tokens = jieba.cut("我们中出了一个叛徒", false);
+        let words: Vec<&str> = tokens.iter().map(|t| t.word).collect();
         assert_eq!(words, vec!["我们", "中", "出", "了", "一个", "叛徒"]);
-        let words = jieba.cut("我们中出了一个叛徒", true);
+        let tokens = jieba.cut("我们中出了一个叛徒", true);
+        let words: Vec<&str> = tokens.iter().map(|t| t.word).collect();
         assert_eq!(words, vec!["我们", "中出", "了", "一个", "叛徒"]);
-        let words = jieba.cut("我们中出了一个叛徒👪", true);
+        let tokens = jieba.cut("我们中出了一个叛徒👪", true);
+        let words: Vec<&str> = tokens.iter().map(|t| t.word).collect();
         assert_eq!(words, vec!["我们", "中出", "了", "一个", "叛徒", "👪"]);
 
-        let words = jieba.cut("我来到北京清华大学", true);
+        let tokens = jieba.cut("我来到北京清华大学", true);
+        let words: Vec<&str> = tokens.iter().map(|t| t.word).collect();
         assert_eq!(words, vec!["我", "来到", "北京", "清华大学"]);
 
-        let words = jieba.cut("他来到了网易杭研大厦", true);
+        let tokens = jieba.cut("他来到了网易杭研大厦", true);
+        let words: Vec<&str> = tokens.iter().map(|t| t.word).collect();
         assert_eq!(words, vec!["他", "来到", "了", "网易", "杭研", "大厦"]);
     }
 
@@ -1051,10 +1132,12 @@ mod tests {
     #[test]
     fn test_cut_for_search() {
         let jieba = Jieba::new();
-        let words = jieba.cut_for_search("南京市长江大桥", true);
+        let tokens = jieba.cut_for_search("南京市长江大桥", true);
+        let words: Vec<&str> = tokens.iter().map(|t| t.word).collect();
         assert_eq!(words, vec!["南京", "京市", "南京市", "长江", "大桥", "长江大桥"]);
 
-        let words = jieba.cut_for_search("小明硕士毕业于中国科学院计算所，后在日本京都大学深造", true);
+        let tokens = jieba.cut_for_search("小明硕士毕业于中国科学院计算所，后在日本京都大学深造", true);
+        let words: Vec<&str> = tokens.iter().map(|t| t.word).collect();
 
         // The python implementation silently filtered "，". but we include it here in the output
         // to let the library user to decide their own filtering strategy
@@ -1094,60 +1177,198 @@ mod tests {
         assert_eq!(
             tags,
             vec![
-                Tag { word: "我", tag: "r" },
-                Tag { word: "是", tag: "v" },
                 Tag {
-                    word: "拖拉机",
-                    tag: "n"
+                    word: "我",
+                    tag: "r",
+                    start: 0,
+                    end: 1,
+                    byte_start: 0,
+                    byte_end: 3,
                 },
                 Tag {
-                    word: "学院", tag: "n"
+                    word: "是",
+                    tag: "v",
+                    start: 1,
+                    end: 2,
+                    byte_start: 3,
+                    byte_end: 6,
+                },
+                Tag {
+                    word: "拖拉机",
+                    tag: "n",
+                    start: 2,
+                    end: 5,
+                    byte_start: 6,
+                    byte_end: 15,
+                },
+                Tag {
+                    word: "学院",
+                    tag: "n",
+                    start: 5,
+                    end: 7,
+                    byte_start: 15,
+                    byte_end: 21,
                 },
                 Tag {
                     word: "手扶拖拉机",
-                    tag: "n"
+                    tag: "n",
+                    start: 7,
+                    end: 12,
+                    byte_start: 21,
+                    byte_end: 36,
                 },
                 Tag {
-                    word: "专业", tag: "n"
+                    word: "专业",
+                    tag: "n",
+                    start: 12,
+                    end: 14,
+                    byte_start: 36,
+                    byte_end: 42,
                 },
-                Tag { word: "的", tag: "uj" },
-                Tag { word: "。", tag: "x" },
                 Tag {
-                    word: "不用", tag: "v"
+                    word: "的",
+                    tag: "uj",
+                    start: 14,
+                    end: 15,
+                    byte_start: 42,
+                    byte_end: 45,
                 },
                 Tag {
-                    word: "多久", tag: "m"
+                    word: "。",
+                    tag: "x",
+                    start: 15,
+                    end: 16,
+                    byte_start: 45,
+                    byte_end: 48,
                 },
-                Tag { word: "，", tag: "x" },
-                Tag { word: "我", tag: "r" },
-                Tag { word: "就", tag: "d" },
-                Tag { word: "会", tag: "v" },
                 Tag {
-                    word: "升职", tag: "v"
+                    word: "不用",
+                    tag: "v",
+                    start: 16,
+                    end: 18,
+                    byte_start: 48,
+                    byte_end: 54,
+                },
+                Tag {
+                    word: "多久",
+                    tag: "m",
+                    start: 18,
+                    end: 20,
+                    byte_start: 54,
+                    byte_end: 60,
+                },
+                Tag {
+                    word: "，",
+                    tag: "x",
+                    start: 20,
+                    end: 21,
+                    byte_start: 60,
+                    byte_end: 63,
+                },
+                Tag {
+                    word: "我",
+                    tag: "r",
+                    start: 21,
+                    end: 22,
+                    byte_start: 63,
+                    byte_end: 66,
+                },
+                Tag {
+                    word: "就",
+                    tag: "d",
+                    start: 22,
+                    end: 23,
+                    byte_start: 66,
+                    byte_end: 69,
+                },
+                Tag {
+                    word: "会",
+                    tag: "v",
+                    start: 23,
+                    end: 24,
+                    byte_start: 69,
+                    byte_end: 72,
+                },
+                Tag {
+                    word: "升职",
+                    tag: "v",
+                    start: 24,
+                    end: 26,
+                    byte_start: 72,
+                    byte_end: 78,
                 },
                 Tag {
                     word: "加薪",
-                    tag: "nr"
+                    tag: "nr",
+                    start: 26,
+                    end: 28,
+                    byte_start: 78,
+                    byte_end: 84,
                 },
-                Tag { word: "，", tag: "x" },
                 Tag {
-                    word: "当上", tag: "t"
+                    word: "，",
+                    tag: "x",
+                    start: 28,
+                    end: 29,
+                    byte_start: 84,
+                    byte_end: 87,
+                },
+                Tag {
+                    word: "当上",
+                    tag: "t",
+                    start: 29,
+                    end: 31,
+                    byte_start: 87,
+                    byte_end: 93,
                 },
                 Tag {
                     word: "CEO",
-                    tag: "eng"
-                },
-                Tag { word: "，", tag: "x" },
-                Tag {
-                    word: "走上", tag: "v"
-                },
-                Tag {
-                    word: "人生", tag: "n"
+                    tag: "eng",
+                    start: 31,
+                    end: 34,
+                    byte_start: 93,
+                    byte_end: 96,
                 },
                 Tag {
-                    word: "巅峰", tag: "n"
+                    word: "，",
+                    tag: "x",
+                    start: 34,
+                    end: 35,
+                    byte_start: 96,
+                    byte_end: 99,
                 },
-                Tag { word: "。", tag: "x" }
+                Tag {
+                    word: "走上",
+                    tag: "v",
+                    start: 35,
+                    end: 37,
+                    byte_start: 99,
+                    byte_end: 105,
+                },
+                Tag {
+                    word: "人生",
+                    tag: "n",
+                    start: 37,
+                    end: 39,
+                    byte_start: 105,
+                    byte_end: 111,
+                },
+                Tag {
+                    word: "巅峰",
+                    tag: "n",
+                    start: 39,
+                    end: 41,
+                    byte_start: 111,
+                    byte_end: 117,
+                },
+                Tag {
+                    word: "。",
+                    tag: "x",
+                    start: 41,
+                    end: 42,
+                    byte_start: 117,
+                    byte_end: 120,
+                }
             ]
         );
 
@@ -1156,46 +1377,141 @@ mod tests {
             tags,
             vec![
                 Tag {
-                    word: "今天", tag: "t"
+                    word: "今天",
+                    tag: "t",
+                    start: 0,
+                    end: 2,
+                    byte_start: 0,
+                    byte_end: 6,
                 },
                 Tag {
                     word: "纽约",
-                    tag: "ns"
+                    tag: "ns",
+                    start: 2,
+                    end: 4,
+                    byte_start: 6,
+                    byte_end: 12,
                 },
-                Tag { word: "的", tag: "uj" },
                 Tag {
-                    word: "天气", tag: "n"
+                    word: "的",
+                    tag: "uj",
+                    start: 4,
+                    end: 5,
+                    byte_start: 12,
+                    byte_end: 15,
                 },
                 Tag {
-                    word: "真好", tag: "d"
+                    word: "天气",
+                    tag: "n",
+                    start: 5,
+                    end: 7,
+                    byte_start: 15,
+                    byte_end: 21,
                 },
-                Tag { word: "啊", tag: "zg" },
-                Tag { word: "，", tag: "x" },
+                Tag {
+                    word: "真好",
+                    tag: "d",
+                    start: 7,
+                    end: 9,
+                    byte_start: 21,
+                    byte_end: 27,
+                },
+                Tag {
+                    word: "啊",
+                    tag: "zg",
+                    start: 9,
+                    end: 10,
+                    byte_start: 27,
+                    byte_end: 30,
+                },
+                Tag {
+                    word: "，",
+                    tag: "x",
+                    start: 10,
+                    end: 11,
+                    byte_start: 30,
+                    byte_end: 33,
+                },
                 Tag {
                     word: "京华",
-                    tag: "nz"
+                    tag: "nz",
+                    start: 11,
+                    end: 13,
+                    byte_start: 33,
+                    byte_end: 39,
                 },
                 Tag {
                     word: "大酒店",
-                    tag: "n"
+                    tag: "n",
+                    start: 13,
+                    end: 16,
+                    byte_start: 39,
+                    byte_end: 48,
                 },
-                Tag { word: "的", tag: "uj" },
                 Tag {
-                    word: "张尧", tag: "x"
+                    word: "的",
+                    tag: "uj",
+                    start: 16,
+                    end: 17,
+                    byte_start: 48,
+                    byte_end: 51,
+                },
+                Tag {
+                    word: "张尧",
+                    tag: "x",
+                    start: 17,
+                    end: 19,
+                    byte_start: 51,
+                    byte_end: 57,
                 }, // XXX: missing in dict
                 Tag {
-                    word: "经理", tag: "n"
+                    word: "经理",
+                    tag: "n",
+                    start: 19,
+                    end: 21,
+                    byte_start: 57,
+                    byte_end: 63,
                 },
-                Tag { word: "吃", tag: "v" },
-                Tag { word: "了", tag: "ul" },
                 Tag {
-                    word: "一只", tag: "m"
+                    word: "吃",
+                    tag: "v",
+                    start: 21,
+                    end: 22,
+                    byte_start: 63,
+                    byte_end: 66,
+                },
+                Tag {
+                    word: "了",
+                    tag: "ul",
+                    start: 22,
+                    end: 23,
+                    byte_start: 66,
+                    byte_end: 69,
+                },
+                Tag {
+                    word: "一只",
+                    tag: "m",
+                    start: 23,
+                    end: 25,
+                    byte_start: 69,
+                    byte_end: 75,
                 },
                 Tag {
                     word: "北京烤鸭",
-                    tag: "n"
+                    tag: "n",
+                    start: 25,
+                    end: 29,
+                    byte_start: 75,
+                    byte_end: 87,
                 },
-                Tag { word: "。", tag: "x" }
+                Tag {
+                    word: "。",
+                    tag: "x",
+                    start: 29,
+                    end: 30,
+                    byte_start: 87,
+                    byte_end: 90,
+                }
             ]
         );
     }
@@ -1210,12 +1526,16 @@ mod tests {
                 Token {
                     word: "南京市",
                     start: 0,
-                    end: 3
+                    end: 3,
+                    byte_start: 0,
+                    byte_end: 9,
                 },
                 Token {
                     word: "长江大桥",
                     start: 3,
-                    end: 7
+                    end: 7,
+                    byte_start: 9,
+                    byte_end: 21,
                 }
             ]
         );
@@ -1227,32 +1547,44 @@ mod tests {
                 Token {
                     word: "南京",
                     start: 0,
-                    end: 2
+                    end: 2,
+                    byte_start: 0,
+                    byte_end: 6,
                 },
                 Token {
                     word: "京市",
                     start: 1,
-                    end: 3
+                    end: 3,
+                    byte_start: 3,
+                    byte_end: 9,
                 },
                 Token {
                     word: "南京市",
                     start: 0,
-                    end: 3
+                    end: 3,
+                    byte_start: 0,
+                    byte_end: 9,
                 },
                 Token {
                     word: "长江",
                     start: 3,
-                    end: 5
+                    end: 5,
+                    byte_start: 9,
+                    byte_end: 15,
                 },
                 Token {
                     word: "大桥",
                     start: 5,
-                    end: 7
+                    end: 7,
+                    byte_start: 15,
+                    byte_end: 21,
                 },
                 Token {
                     word: "长江大桥",
                     start: 3,
-                    end: 7
+                    end: 7,
+                    byte_start: 9,
+                    byte_end: 21,
                 }
             ]
         );
@@ -1264,32 +1596,44 @@ mod tests {
                 Token {
                     word: "我们",
                     start: 0,
-                    end: 2
+                    end: 2,
+                    byte_start: 0,
+                    byte_end: 6,
                 },
                 Token {
                     word: "中",
                     start: 2,
-                    end: 3
+                    end: 3,
+                    byte_start: 6,
+                    byte_end: 9,
                 },
                 Token {
                     word: "出",
                     start: 3,
-                    end: 4
+                    end: 4,
+                    byte_start: 9,
+                    byte_end: 12,
                 },
                 Token {
                     word: "了",
                     start: 4,
-                    end: 5
+                    end: 5,
+                    byte_start: 12,
+                    byte_end: 15,
                 },
                 Token {
                     word: "一个",
                     start: 5,
-                    end: 7
+                    end: 7,
+                    byte_start: 15,
+                    byte_end: 21,
                 },
                 Token {
                     word: "叛徒",
                     start: 7,
-                    end: 9
+                    end: 9,
+                    byte_start: 21,
+                    byte_end: 27,
                 }
             ]
         );
@@ -1300,27 +1644,37 @@ mod tests {
                 Token {
                     word: "我们",
                     start: 0,
-                    end: 2
+                    end: 2,
+                    byte_start: 0,
+                    byte_end: 6,
                 },
                 Token {
                     word: "中出",
                     start: 2,
-                    end: 4
+                    end: 4,
+                    byte_start: 6,
+                    byte_end: 12,
                 },
                 Token {
                     word: "了",
                     start: 4,
-                    end: 5
+                    end: 5,
+                    byte_start: 12,
+                    byte_end: 15,
                 },
                 Token {
                     word: "一个",
                     start: 5,
-                    end: 7
+                    end: 7,
+                    byte_start: 15,
+                    byte_end: 21,
                 },
                 Token {
                     word: "叛徒",
                     start: 7,
-                    end: 9
+                    end: 9,
+                    byte_start: 21,
+                    byte_end: 27,
                 }
             ]
         );
@@ -1332,22 +1686,30 @@ mod tests {
                 Token {
                     word: "永和",
                     start: 0,
-                    end: 2
+                    end: 2,
+                    byte_start: 0,
+                    byte_end: 6,
                 },
                 Token {
                     word: "服装",
                     start: 2,
-                    end: 4
+                    end: 4,
+                    byte_start: 6,
+                    byte_end: 12,
                 },
                 Token {
                     word: "饰品",
                     start: 4,
-                    end: 6
+                    end: 6,
+                    byte_start: 12,
+                    byte_end: 18,
                 },
                 Token {
                     word: "有限公司",
                     start: 6,
-                    end: 10
+                    end: 10,
+                    byte_start: 18,
+                    byte_end: 30,
                 }
             ]
         );
@@ -1363,32 +1725,44 @@ mod tests {
                 Token {
                     word: "我们",
                     start: 0,
-                    end: 2
+                    end: 2,
+                    byte_start: 0,
+                    byte_end: 6
                 },
                 Token {
                     word: "中",
                     start: 2,
-                    end: 3
+                    end: 3,
+                    byte_start: 6,
+                    byte_end: 9
                 },
                 Token {
                     word: "出",
                     start: 3,
-                    end: 4
+                    end: 4,
+                    byte_start: 9,
+                    byte_end: 12
                 },
                 Token {
                     word: "了",
                     start: 4,
-                    end: 5
+                    end: 5,
+                    byte_start: 12,
+                    byte_end: 15
                 },
                 Token {
                     word: "一个",
                     start: 5,
-                    end: 7
+                    end: 7,
+                    byte_start: 15,
+                    byte_end: 21
                 },
                 Token {
                     word: "叛徒",
                     start: 7,
-                    end: 9
+                    end: 9,
+                    byte_start: 21,
+                    byte_end: 27
                 }
             ]
         );
@@ -1401,27 +1775,37 @@ mod tests {
                 Token {
                     word: "我们",
                     start: 0,
-                    end: 2
+                    end: 2,
+                    byte_start: 0,
+                    byte_end: 6
                 },
                 Token {
                     word: "中出",
                     start: 2,
-                    end: 4
+                    end: 4,
+                    byte_start: 6,
+                    byte_end: 12
                 },
                 Token {
                     word: "了",
                     start: 4,
-                    end: 5
+                    end: 5,
+                    byte_start: 12,
+                    byte_end: 15
                 },
                 Token {
                     word: "一个",
                     start: 5,
-                    end: 7
+                    end: 7,
+                    byte_start: 15,
+                    byte_end: 21
                 },
                 Token {
                     word: "叛徒",
                     start: 7,
-                    end: 9
+                    end: 9,
+                    byte_start: 21,
+                    byte_end: 27
                 }
             ]
         );
@@ -1437,27 +1821,37 @@ mod tests {
                 Token {
                     word: "我们",
                     start: 0,
-                    end: 2
+                    end: 2,
+                    byte_start: 0,
+                    byte_end: 6
                 },
                 Token {
                     word: "中出",
                     start: 2,
-                    end: 4
+                    end: 4,
+                    byte_start: 6,
+                    byte_end: 12
                 },
                 Token {
                     word: "了",
                     start: 4,
-                    end: 5
+                    end: 5,
+                    byte_start: 12,
+                    byte_end: 15
                 },
                 Token {
                     word: "一个",
                     start: 5,
-                    end: 7
+                    end: 7,
+                    byte_start: 15,
+                    byte_end: 21
                 },
                 Token {
                     word: "叛徒",
                     start: 7,
-                    end: 9
+                    end: 9,
+                    byte_start: 21,
+                    byte_end: 27
                 }
             ]
         );
@@ -1470,27 +1864,37 @@ mod tests {
                 Token {
                     word: "我们",
                     start: 0,
-                    end: 2
+                    end: 2,
+                    byte_start: 0,
+                    byte_end: 6
                 },
                 Token {
                     word: "中",
                     start: 2,
-                    end: 3
+                    end: 3,
+                    byte_start: 6,
+                    byte_end: 9
                 },
                 Token {
                     word: "出了",
                     start: 3,
-                    end: 5
+                    end: 5,
+                    byte_start: 9,
+                    byte_end: 15
                 },
                 Token {
                     word: "一个",
                     start: 5,
-                    end: 7
+                    end: 7,
+                    byte_start: 15,
+                    byte_end: 21
                 },
                 Token {
                     word: "叛徒",
                     start: 7,
-                    end: 9
+                    end: 9,
+                    byte_start: 21,
+                    byte_end: 27
                 }
             ]
         );
@@ -1531,7 +1935,8 @@ mod tests {
 
         jieba.add_word("测试", Some(2445), None);
         jieba.add_word("测试", Some(10), None);
-        let words = jieba.cut("测试", false);
+        let tokens = jieba.cut("测试", false);
+        let words: Vec<&str> = tokens.iter().map(|t| t.word).collect();
         assert_eq!(words, vec!["测试"]);
     }
 
@@ -1543,7 +1948,8 @@ mod tests {
         jieba.add_word("䶴䶵𦡦", Some(1000), None);
         jieba.add_word("讥䶯䶰䶱䶲䶳", Some(1000), None);
 
-        let words = jieba.cut("讥䶯䶰䶱䶲䶳䶴䶵𦡦", false);
+        let tokens = jieba.cut("讥䶯䶰䶱䶲䶳䶴䶵𦡦", false);
+        let words: Vec<&str> = tokens.iter().map(|t| t.word).collect();
         assert_eq!(words, vec!["讥䶯䶰䶱䶲䶳", "䶴䶵𦡦"]);
     }
 
@@ -1551,7 +1957,8 @@ mod tests {
     fn test_add_custom_word_with_underscrore() {
         let mut jieba = Jieba::empty();
         jieba.add_word("田-女士", Some(42), Some("n"));
-        let words = jieba.cut("市民田-女士急匆匆", false);
+        let tokens = jieba.cut("市民田-女士急匆匆", false);
+        let words: Vec<&str> = tokens.iter().map(|t| t.word).collect();
         assert_eq!(words, vec!["市", "民", "田-女士", "急", "匆", "匆"]);
     }
 
