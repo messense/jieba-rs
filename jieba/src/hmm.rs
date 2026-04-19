@@ -116,7 +116,7 @@ const MIN_FLOAT: f64 = -3.14e100;
 pub(crate) trait HmmParams {
     fn initial_prob(&self, state: usize) -> f64;
     fn trans_prob(&self, from: usize, to: usize) -> f64;
-    fn emit_prob(&self, state: usize, word: &str) -> f64;
+    fn emit_prob(&self, state: usize, ch: char) -> f64;
 }
 
 /// The compile-time embedded HMM parameters.
@@ -130,12 +130,12 @@ impl HmmParams for BuiltinHmm {
 
     #[inline]
     fn trans_prob(&self, from: usize, to: usize) -> f64 {
-        TRANS_PROBS[from].get(to).cloned().unwrap_or(MIN_FLOAT)
+        TRANS_PROBS[from][to]
     }
 
     #[inline]
-    fn emit_prob(&self, state: usize, word: &str) -> f64 {
-        EMIT_PROBS[state].get(word).cloned().unwrap_or(MIN_FLOAT)
+    fn emit_prob(&self, state: usize, ch: char) -> f64 {
+        EMIT_PROBS[state].get(&ch).cloned().unwrap_or(MIN_FLOAT)
     }
 }
 
@@ -146,16 +146,15 @@ pub(crate) struct HmmContext {
     best_path: Vec<State>,
 }
 
-#[allow(non_snake_case)]
+#[allow(non_snake_case, clippy::needless_range_loop)]
 fn viterbi(sentence: &str, params: &impl HmmParams, hmm_context: &mut HmmContext) {
-    let str_len = sentence.len();
     let states = [State::Begin, State::Middle, State::End, State::Single];
     #[allow(non_snake_case)]
     let R = states.len();
 
     // Collect char byte offsets once, derive C from the length
-    let char_offsets: Vec<usize> = sentence.char_indices().map(|x| x.0).collect();
-    let C = char_offsets.len();
+    let chars: Vec<(usize, char)> = sentence.char_indices().collect();
+    let C = chars.len();
     assert!(C > 1);
 
     // TODO: Can code just do fill() with the default instead of clear() and resize?
@@ -171,21 +170,16 @@ fn viterbi(sentence: &str, params: &impl HmmParams, hmm_context: &mut HmmContext
         hmm_context.best_path.resize(C, State::Begin);
     }
 
-    let mut curr = char_offsets.iter().copied().peekable();
-    let x1 = curr.next().unwrap();
-    let x2 = *curr.peek().unwrap();
+    let first_char = chars[0].1;
     for y in &states {
-        let first_word = &sentence[x1..x2];
-        let prob = params.initial_prob(*y as usize) + params.emit_prob(*y as usize, first_word);
+        let prob = params.initial_prob(*y as usize) + params.emit_prob(*y as usize, first_char);
         hmm_context.v[*y as usize] = prob;
     }
 
-    let mut t = 1;
-    while let Some(byte_start) = curr.next() {
+    for t in 1..C {
+        let ch = chars[t].1;
         for y in &states {
-            let byte_end = *curr.peek().unwrap_or(&str_len);
-            let word = &sentence[byte_start..byte_end];
-            let em_prob = params.emit_prob(*y as usize, word);
+            let em_prob = params.emit_prob(*y as usize, ch);
             let (prob, state) = ALLOWED_PREV_STATUS[*y as usize]
                 .iter()
                 .map(|y0| {
@@ -202,8 +196,6 @@ fn viterbi(sentence: &str, params: &impl HmmParams, hmm_context: &mut HmmContext
             hmm_context.v[idx] = prob;
             hmm_context.prev[idx] = Some(state);
         }
-
-        t += 1;
     }
 
     let (_prob, state) = [State::End, State::Single]
@@ -327,8 +319,10 @@ impl HmmParams for HmmModel {
     }
 
     #[inline]
-    fn emit_prob(&self, state: usize, word: &str) -> f64 {
-        self.emit_probs[state].get(word).copied().unwrap_or(MIN_FLOAT)
+    fn emit_prob(&self, state: usize, ch: char) -> f64 {
+        let mut buf = [0u8; 4];
+        let s = ch.encode_utf8(&mut buf);
+        self.emit_probs[state].get(s).copied().unwrap_or(MIN_FLOAT)
     }
 }
 
