@@ -2,6 +2,7 @@ pub(crate) struct StaticSparseDAG {
     array: Vec<u64>,
     /// Maps byte offset → index into `array`. Uses `usize::MAX` as sentinel for "no entry".
     start_pos: Vec<usize>,
+    touched_start_pos: Vec<usize>,
     size_hint_for_iterator: usize,
     curr_insertion_len: usize,
 }
@@ -76,6 +77,7 @@ impl StaticSparseDAG {
         StaticSparseDAG {
             array: Vec::with_capacity(capacity),
             start_pos: vec![NO_ENTRY; start_pos_len],
+            touched_start_pos: Vec::with_capacity(MIN_CAPACITY),
             size_hint_for_iterator: 0,
             curr_insertion_len: 0,
         }
@@ -87,6 +89,9 @@ impl StaticSparseDAG {
         self.curr_insertion_len = 0;
         if from >= self.start_pos.len() {
             self.start_pos.resize(from + 1, NO_ENTRY);
+        }
+        if self.start_pos[from] == NO_ENTRY {
+            self.touched_start_pos.push(from);
         }
         self.start_pos[from] = idx;
     }
@@ -125,7 +130,9 @@ impl StaticSparseDAG {
 
     pub(crate) fn clear(&mut self) {
         self.array.clear();
-        self.start_pos.fill(NO_ENTRY);
+        for from in self.touched_start_pos.drain(..) {
+            self.start_pos[from] = NO_ENTRY;
+        }
     }
 }
 
@@ -153,5 +160,27 @@ mod tests {
             let edges: Vec<usize> = dag.iter_edges(i).map(|(to, _)| to).collect();
             assert_eq!(item, &edges);
         }
+    }
+
+    #[test]
+    fn test_clear_resets_touched_offsets() {
+        let mut dag = StaticSparseDAG::with_size_hint(2);
+
+        dag.start(0);
+        dag.insert(1, 1);
+        dag.commit();
+        dag.start(3);
+        dag.insert(4, 2);
+        dag.commit();
+
+        assert_ne!(dag.start_pos[0], NO_ENTRY);
+        assert_ne!(dag.start_pos[3], NO_ENTRY);
+
+        dag.clear();
+
+        assert!(dag.array.is_empty());
+        assert!(dag.touched_start_pos.is_empty());
+        assert_eq!(dag.start_pos[0], NO_ENTRY);
+        assert_eq!(dag.start_pos[3], NO_ENTRY);
     }
 }
