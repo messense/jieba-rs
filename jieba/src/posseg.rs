@@ -36,7 +36,7 @@ fn parse_posseg_data(data: &str) -> PossegData {
     let mut tags: Vec<Box<str>> = Vec::new();
     let mut start_prob = [MIN_FLOAT; NUM_STATES];
     // Initialize dense matrix to MIN_FLOAT
-    let mut trans_prob = vec![[MIN_FLOAT; NUM_STATES]; NUM_STATES].into_boxed_slice();
+    let trans_prob = vec![[MIN_FLOAT; NUM_STATES]; NUM_STATES].into_boxed_slice();
     let trans_prob: Box<[[f64; NUM_STATES]; NUM_STATES]> = unsafe {
         let ptr = Box::into_raw(trans_prob) as *mut [[f64; NUM_STATES]; NUM_STATES];
         Box::from_raw(ptr)
