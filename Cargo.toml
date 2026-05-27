@@ -16,6 +16,7 @@ jieba-macros = { version = "0.10.0", path = "jieba-macros" }
 
 # Crates.io dependencies
 c_fixed_string = { version = "0.2" }
+bytecount = { version = "0.6", features = ["runtime-dispatch-simd"] }
 cedarwood = { version = "0.4" }
 codspeed-criterion-compat = { version = "3.0.5" }
 rustc-hash = { version = "2.1" }
