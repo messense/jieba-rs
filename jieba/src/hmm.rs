@@ -144,6 +144,7 @@ pub(crate) struct HmmContext {
     v: Vec<f64>,
     prev: Vec<Option<State>>,
     best_path: Vec<State>,
+    chars: Vec<(usize, char)>,
 }
 
 #[allow(non_snake_case, clippy::needless_range_loop)]
@@ -152,15 +153,17 @@ fn viterbi(sentence: &str, params: &impl HmmParams, hmm_context: &mut HmmContext
     #[allow(non_snake_case)]
     let R = states.len();
 
-    // Collect char byte offsets once, derive C from the length
-    let chars: Vec<(usize, char)> = sentence.char_indices().collect();
+    // Collect char byte offsets into reusable scratch space, derive C from the length.
+    hmm_context.chars.clear();
+    hmm_context.chars.extend(sentence.char_indices());
+    let chars = &hmm_context.chars;
     let C = chars.len();
     assert!(C > 1);
 
-    // TODO: Can code just do fill() with the default instead of clear() and resize?
     if hmm_context.prev.len() < R * C {
         hmm_context.prev.resize(R * C, None);
     }
+    hmm_context.prev[..R].fill(None);
 
     if hmm_context.v.len() < R * C {
         hmm_context.v.resize(R * C, 0.0);
@@ -214,9 +217,7 @@ fn viterbi(sentence: &str, params: &impl HmmParams, hmm_context: &mut HmmContext
         curr = p;
         t -= 1;
     }
-
-    hmm_context.prev.clear();
-    hmm_context.v.clear();
+    hmm_context.best_path.truncate(C);
 }
 
 #[allow(non_snake_case)]
@@ -230,37 +231,31 @@ fn cut_internal<'a>(
     viterbi(sentence, params, hmm_context);
     let mut begin = 0;
     let mut next_byte_offset = 0;
-    let mut i = 0;
 
-    let mut curr = sentence.char_indices().map(|x| x.0).peekable();
-    while let Some(curr_byte_offset) = curr.next() {
+    for (i, &(curr_byte_offset, _)) in hmm_context.chars.iter().enumerate() {
         let state = hmm_context.best_path[i];
         match state {
             State::Begin => begin = curr_byte_offset,
             State::End => {
                 let byte_start = begin;
-                let byte_end = *curr.peek().unwrap_or(&str_len);
+                let byte_end = hmm_context.chars.get(i + 1).map_or(str_len, |&(offset, _)| offset);
                 words.push(&sentence[byte_start..byte_end]);
                 next_byte_offset = byte_end;
             }
             State::Single => {
                 let byte_start = curr_byte_offset;
-                let byte_end = *curr.peek().unwrap_or(&str_len);
+                let byte_end = hmm_context.chars.get(i + 1).map_or(str_len, |&(offset, _)| offset);
                 words.push(&sentence[byte_start..byte_end]);
                 next_byte_offset = byte_end;
             }
             State::Middle => { /* do nothing */ }
         }
-
-        i += 1;
     }
 
     if next_byte_offset < str_len {
         let byte_start = next_byte_offset;
         words.push(&sentence[byte_start..]);
     }
-
-    hmm_context.best_path.clear();
 }
 
 #[allow(non_snake_case)]

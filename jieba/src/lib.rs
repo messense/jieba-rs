@@ -140,6 +140,15 @@ fn is_skip_cut_all(c: char) -> bool {
     !c.is_ascii_alphanumeric() && c != '+' && c != '#' && c != '\n'
 }
 
+#[inline]
+fn char_count(s: &str) -> usize {
+    if s.len() >= 16 {
+        bytecount::num_chars(s.as_bytes())
+    } else {
+        s.as_bytes().iter().filter(|&&b| (b as i8) >= -0x40).count()
+    }
+}
+
 /// Iterator that splits text into matched/unmatched regions by a character classifier.
 /// Matched = maximal runs where `classify(c)` is true.
 /// Unmatched = everything between matched runs.
@@ -605,7 +614,7 @@ impl Jieba {
                 } else {
                     &block[byte_start..byte_end]
                 };
-                let char_count = word.as_bytes().iter().filter(|&&b| (b as i8) >= -0x40).count();
+                let char_count = char_count(word);
                 let bs = byte_offset_in_sentence + byte_start;
                 tokens.push(Token {
                     word,
@@ -748,7 +757,7 @@ impl Jieba {
         let byte_end = byte_start + word.len();
         let start = *unicode_offset;
         // Count UTF-8 leading bytes to get char count without allocating
-        let char_count = word.as_bytes().iter().filter(|&&b| (b as i8) >= -0x40).count();
+        let char_count = char_count(word);
         *unicode_offset = start + char_count;
         Token {
             word,
@@ -839,7 +848,7 @@ impl Jieba {
                     assert!(!block.is_empty());
                     let block_unicode_start = unicode_offset;
                     // Advance unicode_offset past this block
-                    unicode_offset += block.chars().count();
+                    unicode_offset += char_count(block);
                     self.cut_all_tokens(block, base, block_unicode_start, &mut tokens);
                 }
                 SplitState::Unmatched(_) => {
@@ -901,9 +910,11 @@ impl Jieba {
         let words = self.cut(sentence, hmm);
         let mut new_words = Vec::with_capacity(words.len());
         let base = sentence.as_ptr() as usize;
+        let mut char_indices = Vec::new();
         for token in words {
             let word = token.word;
-            let char_indices: Vec<usize> = word.char_indices().map(|x| x.0).collect();
+            char_indices.clear();
+            char_indices.extend(word.char_indices().map(|x| x.0));
             let char_count = char_indices.len();
             if char_count > 2 {
                 for i in 0..char_count - 1 {

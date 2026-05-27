@@ -22,6 +22,7 @@ textrank = ["dep:ordered-float"]
 
 [dependencies]
 jieba-macros = { workspace = true }
+bytecount = { workspace = true }
 cedarwood = { workspace = true }
 rustc-hash = { workspace = true }
 include-flate = { workspace = true, optional = true }
