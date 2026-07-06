@@ -608,10 +608,16 @@ impl Jieba {
 
     /// Emits `Token`s directly with unicode positions for cut_all,
     /// avoiding the need for a separate byte-to-unicode lookup table.
-    fn cut_all_tokens<'a>(&self, block: &'a str, base: usize, block_unicode_start: usize, tokens: &mut Vec<Token<'a>>) {
+    fn cut_all_tokens<'a>(
+        &self,
+        block: &'a str,
+        base: usize,
+        block_unicode_start: usize,
+        tokens: &mut Vec<Token<'a>>,
+        dag: &mut StaticSparseDAG,
+    ) {
         let str_len = block.len();
-        let mut dag = StaticSparseDAG::with_size_hint(block.len());
-        self.dag(block, &mut dag);
+        self.dag(block, dag);
 
         let block_base = block.as_ptr() as usize;
         let byte_offset_in_sentence = block_base - base;
@@ -635,6 +641,7 @@ impl Jieba {
                 });
             }
         }
+        dag.clear();
     }
 
     fn cut_dag_no_hmm<'a>(
@@ -848,6 +855,7 @@ impl Jieba {
 
         let heuristic_capacity = sentence.len() / 2;
         let mut tokens = Vec::with_capacity(heuristic_capacity);
+        let mut dag = StaticSparseDAG::with_size_hint(heuristic_capacity);
 
         let splitter = SplitByCharacterClass::new(sentence, is_han_cut_all);
 
@@ -859,7 +867,7 @@ impl Jieba {
                     let block_unicode_start = unicode_offset;
                     // Advance unicode_offset past this block
                     unicode_offset += char_count(block);
-                    self.cut_all_tokens(block, base, block_unicode_start, &mut tokens);
+                    self.cut_all_tokens(block, base, block_unicode_start, &mut tokens, &mut dag);
                 }
                 SplitState::Unmatched(_) => {
                     let block = state.as_str();
