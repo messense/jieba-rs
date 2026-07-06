@@ -1,4 +1,5 @@
 use proc_macro::TokenStream;
+use std::collections::BTreeMap;
 
 #[proc_macro]
 pub fn generate_hmm_data(_input: TokenStream) -> TokenStream {
@@ -31,25 +32,29 @@ pub fn generate_hmm_data(_input: TokenStream) -> TokenStream {
     output.push_str("];\n\n");
 
     // Emission probabilities
+    let mut emit_probs: BTreeMap<char, [String; 4]> = BTreeMap::new();
     for (i, line) in lines.filter(|x| !x.starts_with('#')).enumerate() {
-        output.push_str("#[allow(clippy::style)]\n");
-        output.push_str(&format!("pub static EMIT_PROB_{i}: phf::Map<char, f64> = "));
-
-        let mut map = phf_codegen::Map::new();
         for word_prob in line.split(',') {
             let mut parts = word_prob.split(':');
             let word = parts.next().unwrap();
             let prob = parts.next().unwrap();
             // All emit keys are single characters
             let ch = word.chars().next().unwrap();
-            map.entry(ch, prob);
+            let probs = emit_probs
+                .entry(ch)
+                .or_insert_with(|| std::array::from_fn(|_| "MIN_FLOAT".to_string()));
+            probs[i] = prob.to_string();
         }
-        output.push_str(&map.build().to_string());
-        output.push_str(";\n\n");
     }
 
     output.push_str("#[allow(clippy::style)]\n");
-    output.push_str("pub static EMIT_PROBS: [&'static phf::Map<char, f64>; 4] = [&EMIT_PROB_0, &EMIT_PROB_1, &EMIT_PROB_2, &EMIT_PROB_3];\n\n");
+    output.push_str("pub static EMIT_PROBS: phf::Map<char, [f64; 4]> = ");
+    let mut map = phf_codegen::Map::new();
+    for (ch, probs) in emit_probs {
+        map.entry(ch, format!("[{}, {}, {}, {}]", probs[0], probs[1], probs[2], probs[3]));
+    }
+    output.push_str(&map.build().to_string());
+    output.push_str(";\n\n");
 
     output.parse().unwrap()
 }

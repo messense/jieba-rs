@@ -116,7 +116,7 @@ const MIN_FLOAT: f64 = -3.14e100;
 pub(crate) trait HmmParams {
     fn initial_prob(&self, state: usize) -> f64;
     fn trans_prob(&self, from: usize, to: usize) -> f64;
-    fn emit_prob(&self, state: usize, ch: char) -> f64;
+    fn emit_probs(&self, ch: char) -> [f64; NUM_STATES];
 }
 
 /// The compile-time embedded HMM parameters.
@@ -134,8 +134,8 @@ impl HmmParams for BuiltinHmm {
     }
 
     #[inline]
-    fn emit_prob(&self, state: usize, ch: char) -> f64 {
-        EMIT_PROBS[state].get(&ch).cloned().unwrap_or(MIN_FLOAT)
+    fn emit_probs(&self, ch: char) -> [f64; NUM_STATES] {
+        EMIT_PROBS.get(&ch).copied().unwrap_or([MIN_FLOAT; NUM_STATES])
     }
 }
 
@@ -174,15 +174,17 @@ fn viterbi(sentence: &str, params: &impl HmmParams, hmm_context: &mut HmmContext
     }
 
     let first_char = chars[0].1;
+    let emit_probs = params.emit_probs(first_char);
     for y in &states {
-        let prob = params.initial_prob(*y as usize) + params.emit_prob(*y as usize, first_char);
+        let prob = params.initial_prob(*y as usize) + emit_probs[*y as usize];
         hmm_context.v[*y as usize] = prob;
     }
 
     for t in 1..C {
         let ch = chars[t].1;
+        let emit_probs = params.emit_probs(ch);
         for y in &states {
-            let em_prob = params.emit_prob(*y as usize, ch);
+            let em_prob = emit_probs[*y as usize];
             let (prob, state) = ALLOWED_PREV_STATUS[*y as usize]
                 .iter()
                 .map(|y0| {
@@ -299,7 +301,7 @@ pub(crate) fn cut_with_allocated_memory<'a>(
 pub struct HmmModel {
     initial_probs: [f64; NUM_STATES],
     trans_probs: [[f64; NUM_STATES]; NUM_STATES],
-    emit_probs: [FxHashMap<Box<str>, f64>; NUM_STATES],
+    emit_probs: FxHashMap<char, [f64; NUM_STATES]>,
 }
 
 impl HmmParams for HmmModel {
@@ -314,10 +316,8 @@ impl HmmParams for HmmModel {
     }
 
     #[inline]
-    fn emit_prob(&self, state: usize, ch: char) -> f64 {
-        let mut buf = [0u8; 4];
-        let s = ch.encode_utf8(&mut buf);
-        self.emit_probs[state].get(s).copied().unwrap_or(MIN_FLOAT)
+    fn emit_probs(&self, ch: char) -> [f64; NUM_STATES] {
+        self.emit_probs.get(&ch).copied().unwrap_or([MIN_FLOAT; NUM_STATES])
     }
 }
 
@@ -356,12 +356,7 @@ impl HmmModel {
         }
 
         // Lines 5-8: emission probs (comma-separated char:prob pairs)
-        let mut emit_probs: [FxHashMap<Box<str>, f64>; NUM_STATES] = [
-            FxHashMap::default(),
-            FxHashMap::default(),
-            FxHashMap::default(),
-            FxHashMap::default(),
-        ];
+        let mut emit_probs: FxHashMap<char, [f64; NUM_STATES]> = FxHashMap::default();
         for i in 0..NUM_STATES {
             for pair in data_lines[5 + i].split(',') {
                 let pair = pair.trim();
@@ -372,10 +367,17 @@ impl HmmModel {
                     .rfind(':')
                     .ok_or_else(|| Error::InvalidHmmModel(format!("invalid emit pair (missing ':'): `{pair}`")))?;
                 let ch = &pair[..colon_pos];
+                let mut chars = ch.chars();
+                let ch = chars
+                    .next()
+                    .ok_or_else(|| Error::InvalidHmmModel(format!("invalid emit char: `{pair}`")))?;
+                if chars.next().is_some() {
+                    return Err(Error::InvalidHmmModel(format!("emit key must be one char: `{pair}`")));
+                }
                 let prob: f64 = pair[colon_pos + 1..]
                     .parse()
                     .map_err(|e| Error::InvalidHmmModel(format!("invalid emit prob: {e}")))?;
-                emit_probs[i].insert(ch.into(), prob);
+                emit_probs.entry(ch).or_insert([MIN_FLOAT; NUM_STATES])[i] = prob;
             }
         }
 
