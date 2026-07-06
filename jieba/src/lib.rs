@@ -72,7 +72,6 @@
 //! ```
 //!
 
-use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::fmt;
 use std::io::BufRead;
@@ -569,21 +568,26 @@ impl Jieba {
         let mut prev_byte_start = str_len;
         let curr = sentence.char_indices().map(|x| x.0).rev();
         for byte_start in curr {
-            let pair = dag
-                .iter_edges(byte_start)
-                .map(|(byte_end, word_id)| {
-                    let log_freq = if word_id != sparse_dag::NO_MATCH {
-                        self.records[word_id as usize].log_freq
-                    } else {
-                        0.0 // ln(1)
-                    };
+            let mut best = None;
+            for (byte_end, word_id) in dag.iter_edges(byte_start) {
+                let log_freq = if word_id != sparse_dag::NO_MATCH {
+                    self.records[word_id as usize].log_freq
+                } else {
+                    0.0 // ln(1)
+                };
+                let prob = log_freq - logtotal + route[byte_end].0;
 
-                    (log_freq - logtotal + route[byte_end].0, byte_end)
-                })
-                .max_by(|x, y| x.partial_cmp(y).unwrap_or(Ordering::Equal));
+                if let Some((best_prob, best_byte_end)) = best {
+                    if prob > best_prob || (prob == best_prob && byte_end > best_byte_end) {
+                        best = Some((prob, byte_end));
+                    }
+                } else {
+                    best = Some((prob, byte_end));
+                }
+            }
 
-            if let Some(p) = pair {
-                route[byte_start] = p;
+            if let Some(best) = best {
+                route[byte_start] = best;
             } else {
                 let byte_end = prev_byte_start;
                 route[byte_start] = (log1 + route[byte_end].0, byte_end);
