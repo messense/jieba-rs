@@ -95,7 +95,18 @@ impl KeywordExtractConfig {
 
     #[inline]
     pub(crate) fn is_keyword(&self, s: &str) -> bool {
-        s.chars().count() >= self.min_keyword_length() && !self.stop_words_lookup.contains(&s.to_lowercase())
+        let mut char_count = 0;
+        let mut has_uppercase = false;
+        for ch in s.chars() {
+            char_count += 1;
+            has_uppercase |= ch.is_uppercase();
+        }
+
+        if char_count < self.min_keyword_length() || self.stop_words_lookup.contains(s) {
+            return false;
+        }
+
+        !has_uppercase || !self.stop_words_lookup.contains(&s.to_lowercase())
     }
 }
 
