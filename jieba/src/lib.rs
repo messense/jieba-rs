@@ -296,6 +296,7 @@ pub struct Jieba {
     records: Vec<Record>,
     cedar: Cedar,
     total: usize,
+    log_total: f64,
     hmm_model: Option<HmmModel>,
 }
 
@@ -322,6 +323,7 @@ impl Jieba {
             records: Vec::new(),
             cedar: Cedar::new(),
             total: 0,
+            log_total: 0.0f64.ln(),
             hmm_model: None,
         }
     }
@@ -419,6 +421,7 @@ impl Jieba {
         self.records.clear();
         self.cedar = Cedar::new();
         self.total = 0;
+        self.update_log_total();
     }
 
     /// Add word to dict, return `freq`
@@ -449,6 +452,7 @@ impl Jieba {
                 self.total += freq;
             }
         };
+        self.update_log_total();
 
         freq
     }
@@ -526,8 +530,14 @@ impl Jieba {
             buf.clear();
         }
         self.total = self.records.iter().map(|n| n.freq).sum();
+        self.update_log_total();
 
         Ok(())
+    }
+
+    #[inline]
+    fn update_log_total(&mut self) {
+        self.log_total = (self.total as f64).ln();
     }
 
     fn get_word_freq(&self, word: &str, default: usize) -> usize {
@@ -539,7 +549,7 @@ impl Jieba {
 
     /// Suggest word frequency to force the characters in a word to be joined or split.
     pub fn suggest_freq(&self, segment: &str) -> usize {
-        let logtotal = (self.total as f64).ln();
+        let logtotal = self.log_total;
         let logfreq = self.cut(segment, false).iter().fold(0f64, |freq, token| {
             freq + (self.get_word_freq(token.word, 1) as f64).ln() - logtotal
         });
@@ -554,7 +564,7 @@ impl Jieba {
             route.resize(str_len + 1, (0.0, 0));
         }
 
-        let logtotal = (self.total as f64).ln();
+        let logtotal = self.log_total;
         let log1 = 0.0f64 - logtotal; // ln(1) - logtotal, precomputed for freq=1 case
         let mut prev_byte_start = str_len;
         let curr = sentence.char_indices().map(|x| x.0).rev();
