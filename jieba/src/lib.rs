@@ -373,7 +373,11 @@ impl Jieba {
         use std::io::BufReader;
 
         let mut default_dict = BufReader::new(DEFAULT_DICT.as_bytes());
-        self.load_dict(&mut default_dict).unwrap();
+        if self.records.is_empty() {
+            self.load_unique_dict(&mut default_dict).unwrap();
+        } else {
+            self.load_dict(&mut default_dict).unwrap();
+        }
     }
 
     /// Set a custom HMM model for segmentation.
@@ -497,6 +501,14 @@ impl Jieba {
     /// * There is an issue reading from the provided `BufRead` source.
     /// * A line in the dictionary file contains invalid frequency data (not a valid integer).
     pub fn load_dict<R: BufRead>(&mut self, dict: &mut R) -> Result<(), Error> {
+        self.load_dict_inner(dict, true)
+    }
+
+    fn load_unique_dict<R: BufRead>(&mut self, dict: &mut R) -> Result<(), Error> {
+        self.load_dict_inner(dict, false)
+    }
+
+    fn load_dict_inner<R: BufRead>(&mut self, dict: &mut R, check_duplicates: bool) -> Result<(), Error> {
         let mut buf = String::new();
         self.total = 0;
 
@@ -518,16 +530,22 @@ impl Jieba {
                         .unwrap_or(Ok(0))?;
                     let tag = iter.next().unwrap_or("");
 
-                    match self.cedar.exact_match_search(word) {
-                        Some((word_id, _, _)) => {
-                            self.records[word_id as usize].set_freq(freq);
-                        }
-                        None => {
-                            let word_id = self.records.len() as i32;
-                            self.records.push(Record::new(freq, tag.into()));
-                            self.cedar.update(word, word_id);
-                        }
-                    };
+                    if check_duplicates {
+                        match self.cedar.exact_match_search(word) {
+                            Some((word_id, _, _)) => {
+                                self.records[word_id as usize].set_freq(freq);
+                            }
+                            None => {
+                                let word_id = self.records.len() as i32;
+                                self.records.push(Record::new(freq, tag.into()));
+                                self.cedar.update(word, word_id);
+                            }
+                        };
+                    } else {
+                        let word_id = self.records.len() as i32;
+                        self.records.push(Record::new(freq, tag.into()));
+                        self.cedar.update(word, word_id);
+                    }
                 }
             }
             buf.clear();
