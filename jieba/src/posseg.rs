@@ -273,6 +273,7 @@ fn viterbi_posseg<'a>(data: &'a PossegData, chars: &[(usize, char)]) -> Vec<(usi
     let last_t = c_len - 1;
     let mut best_prob = MIN_FLOAT;
     let mut best_state = u16::MAX;
+    #[allow(clippy::needless_range_loop)]
     for s in 0..NUM_STATES {
         let pos = state_pos(s);
         if (pos == 2 || pos == 3) && prev_scores[s] > best_prob {
@@ -335,10 +336,10 @@ fn viterbi_posseg<'a>(data: &'a PossegData, chars: &[(usize, char)]) -> Vec<(usi
     }
 
     // Handle incomplete B..M sequence at end
-    if let Some(&(_, byte_end, _)) = result.last() {
-        if byte_end < str_end {
-            result.push((byte_end, str_end, "x"));
-        }
+    if let Some(&(_, byte_end, _)) = result.last()
+        && byte_end < str_end
+    {
+        result.push((byte_end, str_end, "x"));
     }
 
     result

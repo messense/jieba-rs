@@ -1082,7 +1082,7 @@ impl Jieba {
         #[cfg(feature = "default-dict")]
         {
             // Only use posseg HMM for words containing CJK characters
-            if word.chars().any(|c| is_cjk(c)) {
+            if word.chars().any(is_cjk) {
                 let results = posseg::cut_with_pos(word);
                 if results.len() == 1 {
                     return results[0].1;
