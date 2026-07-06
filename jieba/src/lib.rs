@@ -73,12 +73,16 @@
 //!
 
 use std::collections::HashMap;
+#[cfg(any(feature = "tfidf", feature = "textrank"))]
+use std::collections::HashSet;
 use std::fmt;
 use std::io::BufRead;
 
 use cedarwood::Cedar;
 
 pub(crate) type FxHashMap<K, V> = HashMap<K, V, rustc_hash::FxBuildHasher>;
+#[cfg(any(feature = "tfidf", feature = "textrank"))]
+pub(crate) type FxHashSet<K> = HashSet<K, rustc_hash::FxBuildHasher>;
 
 pub use crate::errors::Error;
 pub use crate::hmm::HmmModel;

@@ -1,4 +1,4 @@
-use crate::Jieba;
+use crate::{FxHashSet, Jieba};
 
 use std::collections::BTreeSet;
 use std::sync::LazyLock;
@@ -61,6 +61,7 @@ pub struct Keyword {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct KeywordExtractConfig {
     stop_words: BTreeSet<String>,
+    stop_words_lookup: FxHashSet<String>,
     min_keyword_length: usize,
     use_hmm: bool,
 }
@@ -94,7 +95,7 @@ impl KeywordExtractConfig {
 
     #[inline]
     pub(crate) fn is_keyword(&self, s: &str) -> bool {
-        s.chars().count() >= self.min_keyword_length() && !self.stop_words.contains(&s.to_lowercase())
+        s.chars().count() >= self.min_keyword_length() && !self.stop_words_lookup.contains(&s.to_lowercase())
     }
 }
 
@@ -118,8 +119,12 @@ impl Default for KeywordExtractConfigBuilder {
 impl KeywordExtractConfigBuilder {
     /// Builds the [`KeywordExtractConfig`] with the current configuration.
     pub fn build(self) -> KeywordExtractConfig {
+        let mut stop_words_lookup =
+            FxHashSet::with_capacity_and_hasher(self.stop_words.len(), rustc_hash::FxBuildHasher);
+        stop_words_lookup.extend(self.stop_words.iter().cloned());
         KeywordExtractConfig {
             stop_words: self.stop_words,
+            stop_words_lookup,
             min_keyword_length: self.min_keyword_length,
             use_hmm: self.use_hmm,
         }
