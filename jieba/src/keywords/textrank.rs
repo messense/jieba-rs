@@ -166,31 +166,27 @@ impl KeywordExtract for TextRank {
             }
         }
 
+        let candidate_ids: Vec<Option<usize>> = tags
+            .iter()
+            .map(|t| {
+                if !allowed_pos_set.is_empty() && !allowed_pos_set.contains(t.tag) {
+                    return None;
+                }
+
+                if !self.config.is_keyword(t.word) {
+                    return None;
+                }
+
+                word2id.get(t.word).copied()
+            })
+            .collect();
+
         let mut cooccurence: HashMap<(usize, usize), usize> = HashMap::default();
-        for (i, t) in tags.iter().enumerate() {
-            if !allowed_pos_set.is_empty() && !allowed_pos_set.contains(t.tag) {
-                continue;
-            }
+        for (i, &u) in candidate_ids.iter().enumerate() {
+            let Some(u) = u else { continue };
 
-            if !self.config.is_keyword(t.word) {
-                continue;
-            }
-
-            for j in (i + 1)..(i + self.span) {
-                if j >= tags.len() {
-                    break;
-                }
-
-                if !allowed_pos_set.is_empty() && !allowed_pos_set.contains(tags[j].tag) {
-                    continue;
-                }
-
-                if !self.config.is_keyword(tags[j].word) {
-                    continue;
-                }
-
-                let u = word2id.get(t.word).unwrap().to_owned();
-                let v = word2id.get(tags[j].word).unwrap().to_owned();
+            for &v in candidate_ids.iter().take(i + self.span).skip(i + 1) {
+                let Some(v) = v else { continue };
                 let entry = cooccurence.entry((u, v)).or_insert(0);
                 *entry += 1;
             }
