@@ -158,6 +158,9 @@ impl KeywordExtract for TextRank {
             if !allowed_pos_set.is_empty() && !allowed_pos_set.contains(t.tag) {
                 continue;
             }
+            if !self.config.is_keyword(t.word) {
+                continue;
+            }
 
             word2tag.entry(t.word).or_insert(t.tag);
             if !word2id.contains_key(t.word) {
@@ -170,10 +173,6 @@ impl KeywordExtract for TextRank {
             .iter()
             .map(|t| {
                 if !allowed_pos_set.is_empty() && !allowed_pos_set.contains(t.tag) {
-                    return None;
-                }
-
-                if !self.config.is_keyword(t.word) {
                     return None;
                 }
 
@@ -256,5 +255,21 @@ mod tests {
     fn test_init_state_diagram() {
         let diagram = StateDiagram::new(10);
         assert_eq!(diagram.g.len(), 10);
+    }
+
+    #[test]
+    fn test_extract_keywords_filters_invalid_candidates() {
+        let jieba = Jieba::new();
+        let config = KeywordExtractConfig::builder()
+            .min_keyword_length(2)
+            .add_stop_word("股票")
+            .build();
+        let extractor = TextRank::new(5, config);
+
+        let keywords = extractor.extract_keywords(&jieba, "今天股票跌很厉害，股票又跌", 100, vec![]);
+
+        assert!(!keywords.is_empty());
+        assert!(keywords.iter().all(|keyword| keyword.keyword.chars().count() >= 2));
+        assert!(keywords.iter().all(|keyword| keyword.keyword != "股票"));
     }
 }
