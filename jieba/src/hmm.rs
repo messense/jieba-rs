@@ -12,30 +12,44 @@ fn is_hmm_han(c: char) -> bool {
     matches!(c, '\u{4E00}'..='\u{9FD5}')
 }
 
-/// Length of the match starting at `start`, which must be an ASCII
+/// Characters that join two alphanumeric runs into one token.
+///
+/// These are the separators that actually occur inside identifiers — version
+/// numbers, part numbers, ticket ids, code symbols, hostnames. They are a
+/// subset of the characters [`is_han_default`] already keeps inside a block.
+#[inline]
+pub(crate) fn is_skip_connector(b: u8) -> bool {
+    matches!(b, b'.' | b'_' | b'-')
+}
+
+/// [`is_skip_connector`] over a `char`, for callers that iterate characters.
+#[inline]
+pub(crate) fn is_skip_connector_char(c: char) -> bool {
+    matches!(c, '.' | '_' | '-')
+}
+
+/// Length of the alphanumeric token starting at `start`, which must be an ASCII
 /// alphanumeric byte.
 ///
-/// This is upstream jieba's `re_skip`, `([a-zA-Z0-9]+(?:\.\d+)?%?)`, spelled
-/// out: an alphanumeric run, then at most one dot-and-digits group, then an
-/// optional percent sign. Every character it can match is ASCII, so the input
-/// can be walked as bytes — a UTF-8 continuation byte is never alphanumeric,
-/// and every boundary returned falls on a character boundary.
+/// An alphanumeric run, then any number of connector-plus-run groups, then an
+/// optional percent sign. A connector only continues the token when another
+/// alphanumeric follows it, so a trailing separator is left out (`abc-` is
+/// `abc`). Every character this can match is ASCII, so the input is walked as
+/// bytes: a UTF-8 continuation byte is never alphanumeric, so every boundary
+/// returned falls on a character boundary.
 #[inline]
 fn skip_match_len(bytes: &[u8], start: usize) -> usize {
     debug_assert!(bytes[start].is_ascii_alphanumeric());
     let mut end = start;
-    while end < bytes.len() && bytes[end].is_ascii_alphanumeric() {
-        end += 1;
-    }
-    // `(?:\.\d+)?` — the group is optional and not repeated, so a second dot
-    // ends the match instead of extending it: `1.2.3` matches only `1.2`.
-    if end < bytes.len() && bytes[end] == b'.' {
-        let mut digits = end + 1;
-        while digits < bytes.len() && bytes[digits].is_ascii_digit() {
-            digits += 1;
+    loop {
+        while end < bytes.len() && bytes[end].is_ascii_alphanumeric() {
+            end += 1;
         }
-        if digits > end + 1 {
-            end = digits;
+        // Look past one connector; only commit to it if a run follows.
+        if end + 1 < bytes.len() && is_skip_connector(bytes[end]) && bytes[end + 1].is_ascii_alphanumeric() {
+            end += 1;
+        } else {
+            break;
         }
     }
     if end < bytes.len() && bytes[end] == b'%' {
@@ -469,28 +483,51 @@ mod tests {
         expect![[r#"["小明", "硕士", "毕业于", "中国", "科学院", "计算", "所"]"#]].assert_eq(&format!("{:?}", words));
     }
 
-    /// The separator in `RE_SKIP` is a literal dot, as in upstream jieba
-    /// (`jieba/finalseg/__init__.py`: `([a-zA-Z0-9]+(?:\.\d+)?%?)`).
+    /// An alphanumeric run joined by `.`, `_` or `-` is one token.
     ///
-    /// While the dot was unescaped it matched any character, so a single
-    /// non-alphanumeric byte was absorbed into the preceding token whenever
-    /// digits followed it: `WES-5.4.5` came out as `WES-5`, `.`, `4.5`, and
-    /// `G260911-0711` was kept whole while `ISU-CNS24093` was split.
+    /// The separator may repeat, and either side of it may be letters or
+    /// digits, so identifiers survive whatever shape they happen to have.
+    /// Before this, the expression could carry at most one separator and
+    /// required digits after it, which cut identifiers apart in a way that
+    /// depended on the characters they happened to contain: `1.2.3` split at
+    /// the second dot, `G260911-0711` survived while `ISU-CNS24093` did not.
+    ///
+    /// A trailing separator is not part of the token, and decimals and
+    /// percentages — what this expression was originally for — are unaffected.
     #[test]
-    fn test_hmm_cut_skip_separator_is_literal_dot() {
+    fn test_hmm_cut_keeps_connected_alphanumerics_together() {
         let mut got = Vec::new();
-        for sentence in ["1.0", "WES-5.4.5", "G260911-0711", "ISU-CNS24093", "3.14", "50%"] {
+        for sentence in [
+            "1.0",
+            "1.2.3",
+            "WES-5.4.5",
+            "G260911-0711",
+            "ISU-CNS24093",
+            "E4850B-I",
+            "OPENSSL_1_1_1",
+            "well-known",
+            "3.14",
+            "50%",
+            "abc-",
+            "-abc",
+        ] {
             let mut words = Vec::new();
             cut(sentence, &mut words);
             got.push(format!("{} -> {:?}", sentence, words));
         }
         expect![[r#"
             1.0 -> ["1.0"]
-            WES-5.4.5 -> ["WES", "-", "5.4", ".", "5"]
-            G260911-0711 -> ["G260911", "-", "0711"]
-            ISU-CNS24093 -> ["ISU", "-", "CNS24093"]
+            1.2.3 -> ["1.2.3"]
+            WES-5.4.5 -> ["WES-5.4.5"]
+            G260911-0711 -> ["G260911-0711"]
+            ISU-CNS24093 -> ["ISU-CNS24093"]
+            E4850B-I -> ["E4850B-I"]
+            OPENSSL_1_1_1 -> ["OPENSSL_1_1_1"]
+            well-known -> ["well-known"]
             3.14 -> ["3.14"]
-            50% -> ["50%"]"#]]
+            50% -> ["50%"]
+            abc- -> ["abc", "-"]
+            -abc -> ["-", "abc"]"#]]
         .assert_eq(&got.join("\n"));
     }
 }

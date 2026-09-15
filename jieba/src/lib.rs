@@ -956,6 +956,30 @@ impl Jieba {
         let base = sentence.as_ptr() as usize;
         let mut char_indices = Vec::new();
         for token in words {
+            // An alphanumeric token joined by connectors is a compound in the
+            // same sense as a multi-word Chinese term, so search mode offers
+            // its parts too: `WES-5.4.5` is findable as `WES` and `5.4.5` as
+            // well as whole. Without this, making `cut` keep such tokens whole
+            // would cost the recall the parts used to provide.
+            if token.word.as_bytes().iter().any(|&b| hmm::is_skip_connector(b)) {
+                let mut offset = 0;
+                for part in token.word.split(hmm::is_skip_connector_char) {
+                    // Only parts that could be searched on their own: a purely
+                    // numeric fragment of a version or part number (the `6` of
+                    // `3.6.3`) is noise, and so is a single character.
+                    if part.len() >= 2 && part.bytes().any(|b| b.is_ascii_alphabetic()) {
+                        let byte_start = token.byte_start + offset;
+                        new_words.push(Token {
+                            word: part,
+                            start: token.start + char_count(&token.word[..offset]),
+                            end: token.start + char_count(&token.word[..offset + part.len()]),
+                            byte_start,
+                            byte_end: byte_start + part.len(),
+                        });
+                    }
+                    offset += part.len() + 1;
+                }
+            }
             let word = token.word;
             char_indices.clear();
             char_indices.extend(word.char_indices().map(|x| x.0));
@@ -1237,6 +1261,68 @@ mod tests {
         // to let the library user to decide their own filtering strategy
         expect![[r#"["小明", "硕士", "毕业", "于", "中国", "科学", "学院", "科学院", "中国科学院", "计算", "计算所", "，", "后", "在", "日本", "京都", "大学", "日本京都大学", "深造"]"#]]
             .assert_eq(&format!("{:?}", words));
+    }
+
+    /// Search mode offers a compound's parts as well as the whole, and that now
+    /// covers alphanumeric compounds too: keeping `well-known` together in
+    /// `cut` would otherwise cost the recall its parts used to provide.
+    ///
+    /// Parts are only worth offering when they could be searched on their own,
+    /// so a purely numeric fragment of a version number (the `6` of `3.6.3`)
+    /// and a single character are left out.
+    #[test]
+    fn test_cut_for_search_offers_parts_of_alphanumeric_compounds() {
+        let jieba = Jieba::new();
+        let mut got = Vec::new();
+        for sentence in [
+            "well-known",
+            "state-of-the-art",
+            "www.example.com",
+            "ISU-CNS24093",
+            "E4850B-I",
+            "OPENSSL_1_1_1",
+            "3.6.3",
+            "01.01.00070",
+            "3.14",
+            "50%",
+        ] {
+            let words: Vec<&str> = jieba.cut_for_search(sentence, true).iter().map(|t| t.word).collect();
+            got.push(format!("{} -> {:?}", sentence, words));
+        }
+        expect![[r#"
+            well-known -> ["well", "known", "well-known"]
+            state-of-the-art -> ["state", "of", "the", "art", "state-of-the-art"]
+            www.example.com -> ["www", "example", "com", "www.example.com"]
+            ISU-CNS24093 -> ["ISU", "CNS24093", "ISU-CNS24093"]
+            E4850B-I -> ["E4850B", "E4850B-I"]
+            OPENSSL_1_1_1 -> ["OPENSSL", "OPENSSL_1_1_1"]
+            3.6.3 -> ["3.6.3"]
+            01.01.00070 -> ["01.01.00070"]
+            3.14 -> ["3.14"]
+            50% -> ["50%"]"#]]
+        .assert_eq(&got.join("\n"));
+    }
+
+    /// An offered part must address itself in the original text, so a caller can
+    /// highlight what it matched.
+    #[test]
+    fn test_cut_for_search_part_offsets() {
+        let jieba = Jieba::new();
+        let sentence = "版本WES-5.4.5发布";
+        let part = jieba
+            .cut_for_search(sentence, true)
+            .into_iter()
+            .find(|t| t.word == "WES")
+            .expect("the leading part is offered");
+        assert_eq!(&sentence[part.byte_start..part.byte_end], "WES");
+        assert_eq!(
+            sentence
+                .chars()
+                .skip(part.start)
+                .take(part.end - part.start)
+                .collect::<String>(),
+            "WES"
+        );
     }
 
     #[test]
