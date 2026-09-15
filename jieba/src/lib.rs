@@ -103,12 +103,12 @@ mod trie;
 include_flate::flate!(static DEFAULT_DICT: str from "src/data/dict.txt");
 
 use sparse_dag::{NO_MATCH, StaticSparseDAG};
-use trie::{CharTrie, WalkScratch};
+use trie::CharTrie;
 
 /// One step of the best segmentation of a block: the log-probability of the
-/// rest of the block from this byte offset, where the chosen word ends, and
-/// that word's dictionary id (`NO_MATCH` for a character not in the
-/// dictionary).
+/// rest of the block from this character, the index of the character after
+/// the chosen word, and that word's dictionary id (`NO_MATCH` for a
+/// character not in the dictionary).
 type RouteEntry = (f64, usize, i32);
 
 /// Per-thread buffers reused across `cut` calls, so segmenting a sentence
@@ -117,7 +117,10 @@ type RouteEntry = (f64, usize, i32);
 struct Scratch {
     route: Vec<RouteEntry>,
     dag: StaticSparseDAG,
-    walk: WalkScratch,
+    /// The characters of the block being segmented: byte offset within the
+    /// block and value. Decoded once by the splitter and used by every
+    /// later pass.
+    chars: Vec<(u32, char)>,
     hmm: hmm::HmmContext,
 }
 
@@ -186,23 +189,6 @@ fn is_skip_cut_all(c: char) -> bool {
     !c.is_ascii_alphanumeric() && c != '+' && c != '#' && c != '\n'
 }
 
-/// Whether a non-empty string is exactly one character: its length is the
-/// width its leading byte announces. Cheaper than decoding two characters.
-#[inline]
-fn is_single_char(s: &str) -> bool {
-    let lead = s.as_bytes()[0];
-    let width = if lead < 0x80 {
-        1
-    } else if lead < 0xE0 {
-        2
-    } else if lead < 0xF0 {
-        3
-    } else {
-        4
-    };
-    s.len() == width
-}
-
 #[inline]
 fn char_count(s: &str) -> usize {
     if s.len() >= 16 {
@@ -226,45 +212,51 @@ impl<'t, F: Fn(char) -> bool> SplitByCharacterClass<'t, F> {
     fn new(text: &'t str, classify: F) -> Self {
         SplitByCharacterClass { text, pos: 0, classify }
     }
+
+    /// The next run, with each of its characters recorded in `chars` as
+    /// `(byte offset within the run, char)`, so later passes over the run
+    /// need not decode it again.
+    #[inline]
+    fn next_recording(&mut self, chars: &mut Vec<(u32, char)>) -> Option<SplitState<'t>> {
+        chars.clear();
+        self.advance(|offset, c| chars.push((offset as u32, c)))
+    }
+
+    #[inline]
+    fn advance(&mut self, mut record: impl FnMut(usize, char)) -> Option<SplitState<'t>> {
+        let text = self.text;
+        if self.pos >= text.len() {
+            return None;
+        }
+
+        let start = self.pos;
+        let mut iter = text[start..].char_indices();
+        let (_, first) = iter.next().unwrap();
+        let matched = (self.classify)(first);
+        record(0, first);
+        let mut end = start + first.len_utf8();
+        for (i, c) in iter {
+            if (self.classify)(c) != matched {
+                break;
+            }
+            record(i, c);
+            end = start + i + c.len_utf8();
+        }
+        self.pos = end;
+        let run = &text[start..end];
+        Some(if matched {
+            SplitState::Matched(run)
+        } else {
+            SplitState::Unmatched(run)
+        })
+    }
 }
 
 impl<'t, F: Fn(char) -> bool> Iterator for SplitByCharacterClass<'t, F> {
     type Item = SplitState<'t>;
 
     fn next(&mut self) -> Option<SplitState<'t>> {
-        if self.pos >= self.text.len() {
-            return None;
-        }
-
-        let remaining = &self.text[self.pos..];
-        let first_char = remaining.chars().next().unwrap();
-
-        if (self.classify)(first_char) {
-            // Matched run: consume while classify is true
-            let start = self.pos;
-            let mut end = self.pos + first_char.len_utf8();
-            for c in remaining[first_char.len_utf8()..].chars() {
-                if (self.classify)(c) {
-                    end += c.len_utf8();
-                } else {
-                    break;
-                }
-            }
-            self.pos = end;
-            Some(SplitState::Matched(&self.text[start..end]))
-        } else {
-            // Unmatched run: consume while classify is false
-            let start = self.pos;
-            let mut end = self.pos + first_char.len_utf8();
-            for c in remaining[first_char.len_utf8()..].chars() {
-                if (self.classify)(c) {
-                    break;
-                }
-                end += c.len_utf8();
-            }
-            self.pos = end;
-            Some(SplitState::Unmatched(&self.text[start..end]))
-        }
+        self.advance(|_, _| {})
     }
 }
 
@@ -669,60 +661,54 @@ impl Jieba {
         std::cmp::max((logfreq + logtotal).exp() as usize + 1, self.get_word_freq(segment, 1))
     }
 
+    /// Byte offset of character `idx` of `block`, or the block's length
+    /// for the index past its last character.
+    #[inline(always)]
+    fn byte_at(block: &str, chars: &[(u32, char)], idx: usize) -> usize {
+        chars.get(idx).map_or(block.len(), |&(offset, _)| offset as usize)
+    }
+
     #[allow(clippy::ptr_arg)]
-    fn calc(&self, sentence: &str, dag: &StaticSparseDAG, route: &mut Vec<RouteEntry>) {
-        let str_len = sentence.len();
+    fn calc(&self, chars: &[(u32, char)], dag: &StaticSparseDAG, route: &mut Vec<RouteEntry>) {
+        let n = chars.len();
 
         // Every entry read below is either written first (the loop runs from
-        // the end) or is the sentinel at `str_len`, so stale contents from a
+        // the end) or is the sentinel at `n`, so stale contents from a
         // previous block are never observed and need not be cleared.
-        if str_len + 1 > route.len() {
-            route.resize(str_len + 1, (0.0, 0, NO_MATCH));
+        if n + 1 > route.len() {
+            route.resize(n + 1, (0.0, 0, NO_MATCH));
         }
-        route[str_len] = (0.0, 0, NO_MATCH);
+        route[n] = (0.0, n, NO_MATCH);
 
         let logtotal = self.log_total;
         let log1 = 0.0f64 - logtotal; // ln(1) - logtotal, precomputed for freq=1 case
-        let mut prev_byte_start = str_len;
-        let mut char_idx = dag.len();
-        let curr = sentence.char_indices().map(|x| x.0).rev();
-        for byte_start in curr {
-            char_idx -= 1;
+        for idx in (0..n).rev() {
             let mut best: Option<RouteEntry> = None;
-            for (byte_end, word_id) in dag.iter_edges(char_idx) {
+            for (end, word_id) in dag.iter_edges(idx) {
                 let log_freq = if word_id != NO_MATCH {
                     self.log_freqs[word_id as usize]
                 } else {
                     0.0 // ln(1)
                 };
-                let prob = log_freq - logtotal + route[byte_end].0;
+                let prob = log_freq - logtotal + route[end].0;
 
-                if let Some((best_prob, best_byte_end, _)) = best {
-                    if prob > best_prob || (prob == best_prob && byte_end > best_byte_end) {
-                        best = Some((prob, byte_end, word_id));
+                if let Some((best_prob, best_end, _)) = best {
+                    if prob > best_prob || (prob == best_prob && end > best_end) {
+                        best = Some((prob, end, word_id));
                     }
                 } else {
-                    best = Some((prob, byte_end, word_id));
+                    best = Some((prob, end, word_id));
                 }
             }
 
-            if let Some(best) = best {
-                route[byte_start] = best;
-            } else {
-                let byte_end = prev_byte_start;
-                route[byte_start] = (log1 + route[byte_end].0, byte_end, NO_MATCH);
-            }
-
-            prev_byte_start = byte_start;
+            route[idx] = best.unwrap_or_else(|| (log1 + route[idx + 1].0, idx + 1, NO_MATCH));
         }
     }
 
-    fn dag(&self, sentence: &str, dag: &mut StaticSparseDAG, walk: &mut WalkScratch) {
+    fn dag(&self, chars: &[(u32, char)], dag: &mut StaticSparseDAG) {
         self.trie
-            .for_each_prefix_at_every_char(sentence, walk, |char_idx, byte_end, word_id| {
-                dag.push_edge(char_idx, byte_end, word_id)
-            });
-        dag.finish(char_count(sentence));
+            .for_each_prefix_at_every_char(chars, |char_idx, end, word_id| dag.push_edge(char_idx, end, word_id));
+        dag.finish(chars.len());
     }
 
     /// Emits `Token`s directly with unicode positions for cut_all,
@@ -730,32 +716,26 @@ impl Jieba {
     fn cut_all_tokens<'a>(
         &self,
         block: &'a str,
+        chars: &[(u32, char)],
         base: usize,
         block_unicode_start: usize,
         tokens: &mut Vec<Token<'a>>,
         dag: &mut StaticSparseDAG,
-        walk: &mut WalkScratch,
     ) {
-        let str_len = block.len();
-        self.dag(block, dag, walk);
+        self.dag(chars, dag);
 
         let block_base = block.as_ptr() as usize;
         let byte_offset_in_sentence = block_base - base;
 
-        for (unicode_idx, (byte_start, _)) in block.char_indices().enumerate() {
-            let unicode_start = block_unicode_start + unicode_idx;
-            for (byte_end, _) in dag.iter_edges(unicode_idx) {
-                let word = if byte_end == str_len {
-                    &block[byte_start..]
-                } else {
-                    &block[byte_start..byte_end]
-                };
-                let char_count = char_count(word);
+        for (idx, &(byte_start, _)) in chars.iter().enumerate() {
+            let byte_start = byte_start as usize;
+            for (end, _) in dag.iter_edges(idx) {
+                let word = &block[byte_start..Self::byte_at(block, chars, end)];
                 let bs = byte_offset_in_sentence + byte_start;
                 tokens.push(Token {
                     word,
-                    start: unicode_start,
-                    end: unicode_start + char_count,
+                    start: block_unicode_start + idx,
+                    end: block_unicode_start + end,
                     byte_start: bs,
                     byte_end: bs + word.len(),
                 });
@@ -764,66 +744,71 @@ impl Jieba {
         dag.clear();
     }
 
-    /// Emit a joined run of ASCII alphanumerics. Its id is known only when
-    /// it is a single character the route already looked up.
-    #[inline]
-    fn emit_alnum_run<'a>(
-        sentence: &'a str,
-        route: &[RouteEntry],
-        byte_start: usize,
-        byte_end: usize,
-        words: &mut impl FnMut(&'a str, i32),
+    /// Emit the word spanning characters `x..y` of `block` with `word_id`.
+    #[inline(always)]
+    fn emit_span<'a>(
+        block: &'a str,
+        chars: &[(u32, char)],
+        x: usize,
+        y: usize,
+        word_id: i32,
+        words: &mut impl FnMut(&'a str, i32, usize),
     ) {
-        let word_id = if byte_end - byte_start == 1 {
-            route[byte_start].2
-        } else {
-            NO_MATCH
-        };
-        words(&sentence[byte_start..byte_end], word_id);
+        let word = &block[Self::byte_at(block, chars, x)..Self::byte_at(block, chars, y)];
+        words(word, word_id, y - x);
     }
 
     fn cut_dag_no_hmm<'a>(
         &self,
-        sentence: &'a str,
-        words: &mut impl FnMut(&'a str, i32),
+        block: &'a str,
+        chars: &[(u32, char)],
+        words: &mut impl FnMut(&'a str, i32, usize),
         route: &mut Vec<RouteEntry>,
         dag: &mut StaticSparseDAG,
-        walk: &mut WalkScratch,
     ) {
-        self.dag(sentence, dag, walk);
-        self.calc(sentence, dag, route);
+        self.dag(chars, dag);
+        self.calc(chars, dag, route);
+        let n = chars.len();
         let mut x = 0;
         let mut left: Option<usize> = None;
 
-        while x < sentence.len() {
+        while x < n {
             let (_, y, word_id) = route[x];
-            let l_str = &sentence[x..y];
 
-            if l_str.as_bytes()[0].is_ascii_alphanumeric() && y - x == 1 {
+            if y - x == 1 && chars[x].1.is_ascii_alphanumeric() {
                 if left.is_none() {
                     left = Some(x);
                 }
             } else {
-                if let Some(byte_start) = left {
-                    Self::emit_alnum_run(sentence, route, byte_start, x, words);
+                if let Some(start) = left {
+                    // A joined run of ASCII alphanumerics; its id is known
+                    // only when it is a single character the route looked up.
+                    let id = if x - start == 1 { route[start].2 } else { NO_MATCH };
+                    Self::emit_span(block, chars, start, x, id, words);
                     left = None;
                 }
 
-                words(l_str, word_id);
+                Self::emit_span(block, chars, x, y, word_id, words);
             }
             x = y;
         }
 
-        if let Some(byte_start) = left {
-            Self::emit_alnum_run(sentence, route, byte_start, sentence.len(), words);
+        if let Some(start) = left {
+            let id = if n - start == 1 { route[start].2 } else { NO_MATCH };
+            Self::emit_span(block, chars, start, n, id, words);
         }
 
         dag.clear();
     }
 
     #[inline]
-    fn hmm_cut<'a>(&self, word: &'a str, words: &mut impl FnMut(&'a str, i32), hmm_context: &mut hmm::HmmContext) {
-        let mut words = |word| words(word, NO_MATCH);
+    fn hmm_cut<'a>(
+        &self,
+        word: &'a str,
+        words: &mut impl FnMut(&'a str, i32, usize),
+        hmm_context: &mut hmm::HmmContext,
+    ) {
+        let mut words = |word: &'a str| words(word, NO_MATCH, char_count(word));
         if let Some(ref model) = self.hmm_model {
             hmm::cut_with_allocated_memory(word, &mut words, model, hmm_context);
         } else {
@@ -832,30 +817,34 @@ impl Jieba {
     }
 
     /// Emit the run of single characters the route left unjoined at
-    /// `sentence[byte_start..byte_end]`: as one word if it is in the
+    /// characters `x..y` of `block`: as one word if it is in the
     /// dictionary, through the HMM if not.
     #[inline]
+    #[allow(clippy::too_many_arguments)]
     fn cut_unjoined_run<'a>(
         &self,
-        sentence: &'a str,
+        block: &'a str,
+        chars: &[(u32, char)],
         route: &[RouteEntry],
-        byte_start: usize,
-        byte_end: usize,
-        words: &mut impl FnMut(&'a str, i32),
+        x: usize,
+        y: usize,
+        words: &mut impl FnMut(&'a str, i32, usize),
         hmm_context: &mut hmm::HmmContext,
     ) {
-        let word = &sentence[byte_start..byte_end];
-        if is_single_char(word) {
-            words(word, route[byte_start].2);
-        } else if self.trie.get(word).is_none() {
+        if y - x == 1 {
+            Self::emit_span(block, chars, x, y, route[x].2, words);
+            return;
+        }
+        let word = &block[Self::byte_at(block, chars, x)..Self::byte_at(block, chars, y)];
+        if self.trie.get(word).is_none() {
             self.hmm_cut(word, words, hmm_context);
         } else {
             // Each character is a route step of its own, so its id is known.
-            let mut x = byte_start;
-            while x < byte_end {
-                let (_, y, word_id) = route[x];
-                words(&sentence[x..y], word_id);
-                x = y;
+            let mut x = x;
+            while x < y {
+                let (_, next, word_id) = route[x];
+                Self::emit_span(block, chars, x, next, word_id, words);
+                x = next;
             }
         }
     }
@@ -863,54 +852,57 @@ impl Jieba {
     #[allow(non_snake_case, clippy::too_many_arguments)]
     fn cut_dag_hmm<'a>(
         &self,
-        sentence: &'a str,
-        words: &mut impl FnMut(&'a str, i32),
+        block: &'a str,
+        chars: &[(u32, char)],
+        words: &mut impl FnMut(&'a str, i32, usize),
         route: &mut Vec<RouteEntry>,
         dag: &mut StaticSparseDAG,
-        walk: &mut WalkScratch,
         hmm_context: &mut hmm::HmmContext,
     ) {
-        self.dag(sentence, dag, walk);
-        self.calc(sentence, dag, route);
+        self.dag(chars, dag);
+        self.calc(chars, dag, route);
+        let n = chars.len();
         let mut x = 0;
         let mut left: Option<usize> = None;
 
-        while x < sentence.len() {
+        while x < n {
             let (_, y, word_id) = route[x];
 
-            if is_single_char(&sentence[x..y]) {
+            if y - x == 1 {
                 if left.is_none() {
                     left = Some(x);
                 }
             } else {
-                if let Some(byte_start) = left {
-                    self.cut_unjoined_run(sentence, route, byte_start, x, words, hmm_context);
+                if let Some(start) = left {
+                    self.cut_unjoined_run(block, chars, route, start, x, words, hmm_context);
                     left = None;
                 }
-                let word = &sentence[x..y];
-                words(word, word_id);
+                Self::emit_span(block, chars, x, y, word_id, words);
             }
             x = y;
         }
 
-        if let Some(byte_start) = left {
-            self.cut_unjoined_run(sentence, route, byte_start, sentence.len(), words, hmm_context);
+        if let Some(start) = left {
+            self.cut_unjoined_run(block, chars, route, start, n, words, hmm_context);
         }
 
         dag.clear();
     }
 
-    /// Create a Token with incrementally tracked unicode offset.
-    /// Returns the updated unicode_offset (past the end of this token).
+    /// Create a Token for a word of `char_count` characters, advancing the
+    /// tracked unicode offset past it.
     #[inline]
-    fn make_token_incremental<'a>(word: &'a str, base: usize, unicode_offset: &mut usize) -> Token<'a> {
+    fn make_token_incremental<'a>(
+        word: &'a str,
+        base: usize,
+        unicode_offset: &mut usize,
+        char_count: usize,
+    ) -> Token<'a> {
         let ptr = word.as_ptr() as usize;
         debug_assert!(ptr >= base, "word is not a subslice of sentence");
         let byte_start = ptr - base;
         let byte_end = byte_start + word.len();
         let start = *unicode_offset;
-        // Count UTF-8 leading bytes to get char count without allocating
-        let char_count = char_count(word);
         *unicode_offset = start + char_count;
         Token {
             word,
@@ -933,47 +925,45 @@ impl Jieba {
             let Scratch {
                 route,
                 dag,
-                walk,
+                chars,
                 hmm: hmm_context,
             } = &mut *scratch;
-            let splitter = SplitByCharacterClass::new(sentence, is_han_default);
+            let mut splitter = SplitByCharacterClass::new(sentence, is_han_default);
 
-            for state in splitter {
+            while let Some(state) = splitter.next_recording(chars) {
                 match state {
-                    SplitState::Matched(_) => {
-                        let block = state.as_str();
+                    SplitState::Matched(block) => {
                         assert!(!block.is_empty());
 
-                        let mut sink = |word: &'a str, word_id: i32| {
-                            emit(Self::make_token_incremental(word, base, &mut unicode_offset), word_id);
+                        let mut sink = |word: &'a str, word_id: i32, char_count: usize| {
+                            emit(
+                                Self::make_token_incremental(word, base, &mut unicode_offset, char_count),
+                                word_id,
+                            );
                         };
                         if hmm {
-                            self.cut_dag_hmm(block, &mut sink, route, dag, walk, hmm_context);
+                            self.cut_dag_hmm(block, chars, &mut sink, route, dag, hmm_context);
                         } else {
-                            self.cut_dag_no_hmm(block, &mut sink, route, dag, walk);
+                            self.cut_dag_no_hmm(block, chars, &mut sink, route, dag);
                         }
                     }
-                    SplitState::Unmatched(_) => {
-                        let block = state.as_str();
+                    SplitState::Unmatched(block) => {
                         assert!(!block.is_empty());
 
-                        let mut chars = block.char_indices().peekable();
-                        while let Some((i, c)) = chars.next() {
+                        let mut i = 0;
+                        while let Some(&(offset, c)) = chars.get(i) {
+                            let offset = offset as usize;
                             // Group \r\n as a single token, otherwise emit each char
-                            let word = if c == '\r' {
-                                if let Some(&(_, '\n')) = chars.peek() {
-                                    let _ = chars.next();
-                                    let end = i + 2;
-                                    &block[i..end]
-                                } else {
-                                    let end = i + c.len_utf8();
-                                    &block[i..end]
-                                }
+                            let (word, count) = if c == '\r' && matches!(chars.get(i + 1), Some(&(_, '\n'))) {
+                                (&block[offset..offset + 2], 2)
                             } else {
-                                let end = i + c.len_utf8();
-                                &block[i..end]
+                                (&block[offset..offset + c.len_utf8()], 1)
                             };
-                            emit(Self::make_token_incremental(word, base, &mut unicode_offset), NO_MATCH);
+                            i += count;
+                            emit(
+                                Self::make_token_incremental(word, base, &mut unicode_offset, count),
+                                NO_MATCH,
+                            );
                         }
                     }
                 }
@@ -992,21 +982,19 @@ impl Jieba {
 
         SCRATCH.with(|scratch| {
             let mut scratch = scratch.borrow_mut();
-            let Scratch { dag, walk, .. } = &mut *scratch;
-            let splitter = SplitByCharacterClass::new(sentence, is_han_cut_all);
+            let Scratch { dag, chars, .. } = &mut *scratch;
+            let mut splitter = SplitByCharacterClass::new(sentence, is_han_cut_all);
 
-            for state in splitter {
+            while let Some(state) = splitter.next_recording(chars) {
                 match state {
-                    SplitState::Matched(_) => {
-                        let block = state.as_str();
+                    SplitState::Matched(block) => {
                         assert!(!block.is_empty());
                         let block_unicode_start = unicode_offset;
                         // Advance unicode_offset past this block
-                        unicode_offset += char_count(block);
-                        self.cut_all_tokens(block, base, block_unicode_start, &mut tokens, dag, walk);
+                        unicode_offset += chars.len();
+                        self.cut_all_tokens(block, chars, base, block_unicode_start, &mut tokens, dag);
                     }
-                    SplitState::Unmatched(_) => {
-                        let block = state.as_str();
+                    SplitState::Unmatched(block) => {
                         assert!(!block.is_empty());
 
                         let skip_splitter = SplitByCharacterClass::new(block, is_skip_cut_all);
@@ -1021,10 +1009,20 @@ impl Jieba {
                                 let mut indices = word.char_indices().peekable();
                                 while let Some((i, _)) = indices.next() {
                                     let end = indices.peek().map_or(word.len(), |&(j, _)| j);
-                                    tokens.push(Self::make_token_incremental(&word[i..end], base, &mut unicode_offset));
+                                    tokens.push(Self::make_token_incremental(
+                                        &word[i..end],
+                                        base,
+                                        &mut unicode_offset,
+                                        1,
+                                    ));
                                 }
                             } else {
-                                tokens.push(Self::make_token_incremental(word, base, &mut unicode_offset));
+                                tokens.push(Self::make_token_incremental(
+                                    word,
+                                    base,
+                                    &mut unicode_offset,
+                                    char_count(word),
+                                ));
                             }
                         }
                     }

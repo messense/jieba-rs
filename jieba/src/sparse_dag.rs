@@ -1,5 +1,5 @@
-/// Word candidates of one block, as edges from a character to the byte
-/// offset where a dictionary word starting there ends, carrying the id of
+/// Word candidates of one block, as edges from a character to the index of
+/// the character after a dictionary word starting there, carrying the id of
 /// that word.
 ///
 /// Positions are the block's characters in order: `start()` opens the edge
@@ -74,13 +74,13 @@ impl StaticSparseDAG {
         }
     }
 
-    /// Record a word spanning from character `char_idx` to byte `byte_end`.
+    /// Record a word spanning characters `char_idx..end`.
     /// Edges must arrive grouped by character, in increasing character
     /// order, and in the order they are to be iterated in.
     #[inline]
-    pub(crate) fn push_edge(&mut self, char_idx: usize, byte_end: usize, word_id: i32) {
+    pub(crate) fn push_edge(&mut self, char_idx: usize, end: usize, word_id: i32) {
         self.open_through(char_idx);
-        self.array.push(encode_edge(byte_end, word_id));
+        self.array.push(encode_edge(end, word_id));
     }
 
     /// Close the current list and open empty ones up to `char_idx`.
@@ -108,7 +108,7 @@ impl StaticSparseDAG {
     }
 
     /// Number of characters whose edge lists have been built.
-    #[inline]
+    #[cfg(test)]
     pub(crate) fn len(&self) -> usize {
         self.start_pos.len()
     }

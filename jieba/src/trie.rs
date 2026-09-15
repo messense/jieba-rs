@@ -56,13 +56,6 @@ struct RootEntry {
     word_id: i32,
 }
 
-/// Reusable buffers for [`CharTrie::for_each_prefix_at_every_char`].
-#[derive(Clone, Default)]
-pub(crate) struct WalkScratch {
-    /// Byte offset and value of each character of the text being walked.
-    chars: Vec<(u32, char)>,
-}
-
 /// Where a node's child pointer is stored.
 #[derive(Clone, Copy)]
 enum ParentRef {
@@ -191,26 +184,19 @@ impl CharTrie {
         (word_id != NO_WORD).then_some(word_id)
     }
 
-    /// Call `emit(char_index, byte_end, word_id)` for every dictionary word
-    /// starting at every character of `text`, position by position and
-    /// shortest word first within a position.
-    pub(crate) fn for_each_prefix_at_every_char(
-        &self,
-        text: &str,
-        scratch: &mut WalkScratch,
-        mut emit: impl FnMut(usize, usize, i32),
-    ) {
+    /// Call `emit(char_index, end_index, word_id)` for every dictionary word
+    /// starting at every character of `chars` (byte offset and value of
+    /// each character of a text), position by position and shortest word
+    /// first within a position. `end_index` is the index of the character
+    /// after the word.
+    pub(crate) fn for_each_prefix_at_every_char(&self, chars: &[(u32, char)], mut emit: impl FnMut(usize, usize, i32)) {
         // Walking a position is a chain of dependent loads that the processor
         // cannot overlap with the next position's chain, so the slot the
         // second character of a position a few steps ahead will need is
         // touched now. By the time the walk arrives it is in cache.
         const LOOKAHEAD: usize = 3;
 
-        let chars = &mut scratch.chars;
-        chars.clear();
-        chars.extend(text.char_indices().map(|(offset, ch)| (offset as u32, ch)));
         let n = chars.len();
-        let end_of_text = text.len();
 
         for pos in 0..n {
             if let Some(&[(_, c1), (_, c2)]) = chars.get(pos + LOOKAHEAD..pos + LOOKAHEAD + 2)
@@ -230,9 +216,8 @@ impl CharTrie {
             let mut key_filter = u64::MAX;
             let mut next = pos + 1;
             loop {
-                let end = chars.get(next).map_or(end_of_text, |&(offset, _)| offset as usize);
                 if word_id != NO_WORD {
-                    emit(pos, end, word_id);
+                    emit(pos, next, word_id);
                 }
                 if next >= n {
                     break;
@@ -342,13 +327,18 @@ impl CharTrie {
 mod tests {
     use super::*;
 
+    fn chars_of(text: &str) -> Vec<(u32, char)> {
+        text.char_indices().map(|(o, c)| (o as u32, c)).collect()
+    }
+
     /// Dictionary words that are prefixes of `text`, shortest first.
     fn prefixes<'a>(trie: &CharTrie, text: &'a str) -> Vec<(i32, &'a str)> {
+        let chars = chars_of(text);
         let mut out = Vec::new();
-        let mut scratch = WalkScratch::default();
-        trie.for_each_prefix_at_every_char(text, &mut scratch, |pos, end, id| {
+        trie.for_each_prefix_at_every_char(&chars, |pos, end, id| {
             if pos == 0 {
-                out.push((id, &text[..end]));
+                let byte_end = chars.get(end).map_or(text.len(), |&(o, _)| o as usize);
+                out.push((id, &text[..byte_end]));
             }
         });
         out
@@ -365,9 +355,8 @@ mod tests {
         }
         let text = "abc中国x";
         let mut out = Vec::new();
-        let mut scratch = WalkScratch::default();
-        trie.for_each_prefix_at_every_char(text, &mut scratch, |pos, end, id| out.push((pos, end, id)));
-        // Position by position, shortest word first.
+        trie.for_each_prefix_at_every_char(&chars_of(text), |pos, end, id| out.push((pos, end, id)));
+        // Position by position, shortest word first; ends are character indices.
         assert_eq!(
             out,
             vec![
@@ -377,9 +366,9 @@ mod tests {
                 (1, 2, 3),
                 (1, 3, 4),
                 (2, 3, 5),
-                (3, 6, 6),
-                (3, 9, 7),
-                (4, 9, 8)
+                (3, 4, 6),
+                (3, 5, 7),
+                (4, 5, 8)
             ]
         );
     }
