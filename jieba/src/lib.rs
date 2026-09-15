@@ -111,6 +111,15 @@ use trie::CharTrie;
 /// character not in the dictionary).
 type RouteEntry = (f64, usize, i32);
 
+/// Initial capacity for a result vector over `sentence`: generous for a
+/// short input, so that segmenting a sentence allocates once, but bounded,
+/// so that a long input with few tokens does not hand back a mostly empty
+/// allocation.
+fn output_capacity(sentence: &str) -> usize {
+    const MAX_INITIAL_CAPACITY: usize = 1 << 12;
+    (sentence.len() / 2).min(MAX_INITIAL_CAPACITY)
+}
+
 /// Per-thread buffers reused across `cut` calls, so segmenting a sentence
 /// allocates only its output.
 #[derive(Default)]
@@ -981,8 +990,7 @@ impl Jieba {
         let base = sentence.as_ptr() as usize;
         let mut unicode_offset = 0;
 
-        let heuristic_capacity = sentence.len() / 2;
-        let mut tokens = Vec::with_capacity(heuristic_capacity);
+        let mut tokens = Vec::with_capacity(output_capacity(sentence));
 
         SCRATCH.with(|scratch| {
             let mut scratch = scratch.borrow_mut();
@@ -1045,7 +1053,7 @@ impl Jieba {
     ///
     /// `hmm`: enable HMM or not
     pub fn cut<'a>(&self, sentence: &'a str, hmm: bool) -> Vec<Token<'a>> {
-        let mut tokens = Vec::with_capacity(sentence.len() / 2);
+        let mut tokens = Vec::with_capacity(output_capacity(sentence));
         self.cut_each(sentence, hmm, |token, _| tokens.push(token));
         tokens
     }
@@ -1067,7 +1075,7 @@ impl Jieba {
     ///
     /// `hmm`: enable HMM or not
     pub fn cut_for_search<'a>(&self, sentence: &'a str, hmm: bool) -> Vec<Token<'a>> {
-        let mut new_words = Vec::with_capacity(sentence.len() / 2);
+        let mut new_words = Vec::with_capacity(output_capacity(sentence));
         let base = sentence.as_ptr() as usize;
         let mut char_indices = Vec::new();
         self.cut_each(sentence, hmm, |token, _| {
@@ -1170,7 +1178,7 @@ impl Jieba {
     ///
     /// `hmm`: enable HMM or not
     pub fn tag<'a>(&'a self, sentence: &'a str, hmm: bool) -> Vec<Tag<'a>> {
-        let mut tags = Vec::with_capacity(sentence.len() / 2);
+        let mut tags = Vec::with_capacity(output_capacity(sentence));
         self.cut_each(sentence, hmm, |token, word_id| {
             let word = token.word;
             // The segmentation already resolved dictionary words; only look
