@@ -105,14 +105,14 @@ include_flate::flate!(static DEFAULT_DICT: str from "src/data/dict.txt");
 
 use sparse_dag::{NO_MATCH, StaticSparseDAG};
 
-/// Per-thread buffers reused across `cut` calls, so segmenting a sentence
-/// allocates only its output.
 /// One step of the best segmentation of a block: the log-probability of the
 /// rest of the block from this byte offset, where the chosen word ends, and
 /// that word's dictionary id (`NO_MATCH` for a character not in the
 /// dictionary).
 type RouteEntry = (f64, usize, i32);
 
+/// Per-thread buffers reused across `cut` calls, so segmenting a sentence
+/// allocates only its output.
 #[derive(Default)]
 struct Scratch {
     route: Vec<RouteEntry>,
@@ -433,7 +433,11 @@ impl Jieba {
             self.records.reserve(lines);
             self.log_freqs.reserve(lines);
         }
-        for line in dict.lines() {
+        // The file is sorted, and cedar keeps each node's children ordered:
+        // a child inserted after its larger siblings walks the whole sibling
+        // chain, one inserted before them goes in first. Reversing the file
+        // makes every insertion the cheap case.
+        for line in dict.lines().rev() {
             let mut iter = line.split_ascii_whitespace();
             let Some(word) = iter.next() else { continue };
             let freq = iter
