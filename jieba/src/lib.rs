@@ -78,8 +78,6 @@ use std::collections::HashSet;
 use std::fmt;
 use std::io::BufRead;
 
-use cedarwood::Cedar;
-
 pub(crate) type FxHashMap<K, V> = HashMap<K, V, rustc_hash::FxBuildHasher>;
 #[cfg(any(feature = "tfidf", feature = "textrank"))]
 pub(crate) type FxHashSet<K> = HashSet<K, rustc_hash::FxBuildHasher>;
@@ -99,11 +97,13 @@ mod hmm;
 mod keywords;
 mod posseg;
 mod sparse_dag;
+mod trie;
 
 #[cfg(feature = "default-dict")]
 include_flate::flate!(static DEFAULT_DICT: str from "src/data/dict.txt");
 
 use sparse_dag::{NO_MATCH, StaticSparseDAG};
+use trie::{CharTrie, WalkScratch};
 
 /// One step of the best segmentation of a block: the log-probability of the
 /// rest of the block from this byte offset, where the chosen word ends, and
@@ -117,6 +117,7 @@ type RouteEntry = (f64, usize, i32);
 struct Scratch {
     route: Vec<RouteEntry>,
     dag: StaticSparseDAG,
+    walk: WalkScratch,
     hmm: hmm::HmmContext,
 }
 
@@ -346,7 +347,7 @@ pub struct Jieba {
     /// only a few dozen tags, so this replaces one heap string per word.
     tags: Vec<Box<str>>,
     tag_ids: FxHashMap<Box<str>, u32>,
-    cedar: Cedar,
+    trie: CharTrie,
     total: usize,
     log_total: f64,
     hmm_model: Option<HmmModel>,
@@ -376,7 +377,7 @@ impl Jieba {
             log_freqs: Vec::new(),
             tags: Vec::new(),
             tag_ids: FxHashMap::default(),
-            cedar: Cedar::new(),
+            trie: CharTrie::new(),
             total: 0,
             log_total: 0.0f64.ln(),
             hmm_model: None,
@@ -432,12 +433,9 @@ impl Jieba {
             let lines = bytecount::count(dict.as_bytes(), b'\n') + 1;
             self.records.reserve(lines);
             self.log_freqs.reserve(lines);
+            self.trie.reserve(lines);
         }
-        // The file is sorted, and cedar keeps each node's children ordered:
-        // a child inserted after its larger siblings walks the whole sibling
-        // chain, one inserted before them goes in first. Reversing the file
-        // makes every insertion the cheap case.
-        for line in dict.lines().rev() {
+        for line in dict.lines() {
             let mut iter = line.split_ascii_whitespace();
             let Some(word) = iter.next() else { continue };
             let freq = iter
@@ -476,7 +474,7 @@ impl Jieba {
     ///
     /// This method performs the following actions:
     /// 1. Clears the `records` list, removing all entries.
-    /// 2. Resets `cedar` to a new instance of `Cedar`.
+    /// 2. Resets the dictionary trie to an empty one.
     /// 3. Sets `total` to 0, resetting the count.
     ///
     /// # Arguments
@@ -498,7 +496,7 @@ impl Jieba {
         self.log_freqs.clear();
         self.tags.clear();
         self.tag_ids.clear();
-        self.cedar = Cedar::new();
+        self.trie = CharTrie::new();
         self.total = 0;
         self.update_log_total();
     }
@@ -515,8 +513,8 @@ impl Jieba {
         let freq = freq.unwrap_or_else(|| self.suggest_freq(word));
         let tag = tag.unwrap_or("");
 
-        match self.cedar.exact_match_search(word) {
-            Some((word_id, _, _)) => {
+        match self.trie.get(word) {
+            Some(word_id) => {
                 let old_freq = self.records[word_id as usize].freq;
                 self.set_freq(word_id as usize, freq);
 
@@ -557,7 +555,7 @@ impl Jieba {
         let tag = self.intern_tag(tag);
         self.records.push(Record { freq, tag });
         self.log_freqs.push((freq as f64).ln());
-        self.cedar.update(word, word_id);
+        self.trie.insert(word, word_id);
     }
 
     /// Add one dictionary entry; with `check_duplicates` an existing word only
@@ -565,8 +563,8 @@ impl Jieba {
     #[inline]
     fn load_entry(&mut self, word: &str, freq: usize, tag: &str, check_duplicates: bool) {
         if check_duplicates {
-            match self.cedar.exact_match_search(word) {
-                Some((word_id, _, _)) => self.set_freq(word_id as usize, freq),
+            match self.trie.get(word) {
+                Some(word_id) => self.set_freq(word_id as usize, freq),
                 None => self.push_record(word, freq, tag),
             }
         } else {
@@ -589,7 +587,7 @@ impl Jieba {
     ///
     /// * `bool` - Whether the word exists in the dictionary.
     pub fn has_word(&self, word: &str) -> bool {
-        self.cedar.exact_match_search(word).is_some()
+        self.trie.get(word).is_some()
     }
 
     /// Loads a dictionary by adding entries to the existing dictionary rather than resetting it.
@@ -656,9 +654,9 @@ impl Jieba {
     }
 
     fn get_word_freq(&self, word: &str, default: usize) -> usize {
-        match self.cedar.exact_match_search(word) {
-            Some((word_id, _, _)) => self.records[word_id as usize].freq,
-            _ => default,
+        match self.trie.get(word) {
+            Some(word_id) => self.records[word_id as usize].freq,
+            None => default,
         }
     }
 
@@ -719,17 +717,12 @@ impl Jieba {
         }
     }
 
-    fn dag(&self, sentence: &str, dag: &mut StaticSparseDAG) {
-        for (byte_start, _) in sentence.char_indices() {
-            dag.start();
-            let haystack = &sentence[byte_start..];
-
-            for (word_id, end_index) in self.cedar.common_prefix_iter(haystack) {
-                dag.insert(end_index + byte_start + 1, word_id);
-            }
-
-            dag.commit();
-        }
+    fn dag(&self, sentence: &str, dag: &mut StaticSparseDAG, walk: &mut WalkScratch) {
+        self.trie
+            .for_each_prefix_at_every_char(sentence, walk, |char_idx, byte_end, word_id| {
+                dag.push_edge(char_idx, byte_end, word_id)
+            });
+        dag.finish(char_count(sentence));
     }
 
     /// Emits `Token`s directly with unicode positions for cut_all,
@@ -741,9 +734,10 @@ impl Jieba {
         block_unicode_start: usize,
         tokens: &mut Vec<Token<'a>>,
         dag: &mut StaticSparseDAG,
+        walk: &mut WalkScratch,
     ) {
         let str_len = block.len();
-        self.dag(block, dag);
+        self.dag(block, dag, walk);
 
         let block_base = block.as_ptr() as usize;
         let byte_offset_in_sentence = block_base - base;
@@ -794,8 +788,9 @@ impl Jieba {
         words: &mut impl FnMut(&'a str, i32),
         route: &mut Vec<RouteEntry>,
         dag: &mut StaticSparseDAG,
+        walk: &mut WalkScratch,
     ) {
-        self.dag(sentence, dag);
+        self.dag(sentence, dag, walk);
         self.calc(sentence, dag, route);
         let mut x = 0;
         let mut left: Option<usize> = None;
@@ -852,7 +847,7 @@ impl Jieba {
         let word = &sentence[byte_start..byte_end];
         if is_single_char(word) {
             words(word, route[byte_start].2);
-        } else if self.cedar.exact_match_search(word).is_none() {
+        } else if self.trie.get(word).is_none() {
             self.hmm_cut(word, words, hmm_context);
         } else {
             // Each character is a route step of its own, so its id is known.
@@ -872,9 +867,10 @@ impl Jieba {
         words: &mut impl FnMut(&'a str, i32),
         route: &mut Vec<RouteEntry>,
         dag: &mut StaticSparseDAG,
+        walk: &mut WalkScratch,
         hmm_context: &mut hmm::HmmContext,
     ) {
-        self.dag(sentence, dag);
+        self.dag(sentence, dag, walk);
         self.calc(sentence, dag, route);
         let mut x = 0;
         let mut left: Option<usize> = None;
@@ -937,6 +933,7 @@ impl Jieba {
             let Scratch {
                 route,
                 dag,
+                walk,
                 hmm: hmm_context,
             } = &mut *scratch;
             let splitter = SplitByCharacterClass::new(sentence, is_han_default);
@@ -951,9 +948,9 @@ impl Jieba {
                             emit(Self::make_token_incremental(word, base, &mut unicode_offset), word_id);
                         };
                         if hmm {
-                            self.cut_dag_hmm(block, &mut sink, route, dag, hmm_context);
+                            self.cut_dag_hmm(block, &mut sink, route, dag, walk, hmm_context);
                         } else {
-                            self.cut_dag_no_hmm(block, &mut sink, route, dag);
+                            self.cut_dag_no_hmm(block, &mut sink, route, dag, walk);
                         }
                     }
                     SplitState::Unmatched(_) => {
@@ -995,7 +992,7 @@ impl Jieba {
 
         SCRATCH.with(|scratch| {
             let mut scratch = scratch.borrow_mut();
-            let dag = &mut scratch.dag;
+            let Scratch { dag, walk, .. } = &mut *scratch;
             let splitter = SplitByCharacterClass::new(sentence, is_han_cut_all);
 
             for state in splitter {
@@ -1006,7 +1003,7 @@ impl Jieba {
                         let block_unicode_start = unicode_offset;
                         // Advance unicode_offset past this block
                         unicode_offset += char_count(block);
-                        self.cut_all_tokens(block, base, block_unicode_start, &mut tokens, dag);
+                        self.cut_all_tokens(block, base, block_unicode_start, &mut tokens, dag, walk);
                     }
                     SplitState::Unmatched(_) => {
                         let block = state.as_str();
@@ -1108,7 +1105,7 @@ impl Jieba {
                     } else {
                         &word[local_byte_start..]
                     };
-                    if self.cedar.exact_match_search(gram2).is_some() {
+                    if self.trie.get(gram2).is_some() {
                         let byte_start = gram2.as_ptr() as usize - base;
                         let byte_end = byte_start + gram2.len();
                         new_words.push(Token {
@@ -1129,7 +1126,7 @@ impl Jieba {
                     } else {
                         &word[local_byte_start..]
                     };
-                    if self.cedar.exact_match_search(gram3).is_some() {
+                    if self.trie.get(gram3).is_some() {
                         let byte_start = gram3.as_ptr() as usize - base;
                         let byte_end = byte_start + gram3.len();
                         new_words.push(Token {
@@ -1179,7 +1176,7 @@ impl Jieba {
             let word_id = if word_id != NO_MATCH {
                 Some(word_id)
             } else {
-                self.cedar.exact_match_search(word).map(|(word_id, _, _)| word_id)
+                self.trie.get(word)
             };
             let tag = match word_id {
                 Some(word_id) => &self.tags[self.records[word_id as usize].tag as usize],

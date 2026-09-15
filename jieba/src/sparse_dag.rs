@@ -8,6 +8,7 @@
 /// index.
 #[derive(Default)]
 pub(crate) struct StaticSparseDAG {
+    /// Edge lists, one per character, each terminated by a 0 sentinel.
     array: Vec<u64>,
     /// Maps character index → index into `array`.
     start_pos: Vec<usize>,
@@ -73,26 +74,43 @@ impl StaticSparseDAG {
         }
     }
 
-    /// Open the edge list of the next character.
+    /// Record a word spanning from character `char_idx` to byte `byte_end`.
+    /// Edges must arrive grouped by character, in increasing character
+    /// order, and in the order they are to be iterated in.
     #[inline]
-    pub(crate) fn start(&mut self) {
-        self.start_pos.push(self.array.len());
+    pub(crate) fn push_edge(&mut self, char_idx: usize, byte_end: usize, word_id: i32) {
+        self.open_through(char_idx);
+        self.array.push(encode_edge(byte_end, word_id));
     }
 
-    /// Number of characters whose edge lists have been opened.
+    /// Close the current list and open empty ones up to `char_idx`.
+    #[inline]
+    fn open_through(&mut self, char_idx: usize) {
+        debug_assert!(
+            self.start_pos.len() <= char_idx + 1,
+            "edges must arrive in character order"
+        );
+        while self.start_pos.len() <= char_idx {
+            if !self.start_pos.is_empty() {
+                self.array.push(0);
+            }
+            self.start_pos.push(self.array.len());
+        }
+    }
+
+    /// Terminate the lists once all edges of the `chars` characters are in.
+    pub(crate) fn finish(&mut self, chars: usize) {
+        if chars == 0 {
+            return;
+        }
+        self.open_through(chars - 1);
+        self.array.push(0);
+    }
+
+    /// Number of characters whose edge lists have been built.
     #[inline]
     pub(crate) fn len(&self) -> usize {
         self.start_pos.len()
-    }
-
-    #[inline]
-    pub(crate) fn insert(&mut self, to: usize, word_id: i32) {
-        self.array.push(encode_edge(to, word_id));
-    }
-
-    #[inline]
-    pub(crate) fn commit(&mut self) {
-        self.array.push(0);
     }
 
     /// Edges of the `char_idx`-th character.
@@ -125,41 +143,39 @@ mod tests {
         let mut dag = StaticSparseDAG::default();
         let mut ans: Vec<Vec<usize>> = vec![Vec::new(); 5];
         for (i, item) in ans.iter_mut().enumerate().take(4) {
-            dag.start();
             for j in (i + 1)..=4 {
                 item.push(j);
-                dag.insert(j, j as i32);
+                dag.push_edge(i, j, j as i32);
             }
-
-            dag.commit()
         }
+        dag.finish(5);
+        assert_eq!(dag.len(), 5);
 
-        for (i, item) in ans.iter().enumerate().take(4) {
+        for (i, item) in ans.iter().enumerate() {
             let edges: Vec<usize> = dag.iter_edges(i).map(|(to, _)| to).collect();
-            assert_eq!(item, &edges);
+            assert_eq!(item, &edges, "character {i}");
         }
     }
 
     #[test]
-    fn test_clear_resets_touched_offsets() {
+    fn test_clear_and_rebuild() {
         let mut dag = StaticSparseDAG::default();
 
-        dag.start();
-        dag.insert(1, 1);
-        dag.commit();
-        dag.start();
-        dag.insert(4, 2);
-        dag.commit();
-        assert_eq!(dag.len(), 2);
+        dag.push_edge(0, 1, 1);
+        dag.push_edge(2, 4, 2);
+        dag.finish(4);
+        assert_eq!(dag.len(), 4);
+        assert_eq!(dag.iter_edges(1).count(), 0);
+        assert_eq!(dag.iter_edges(2).collect::<Vec<_>>(), vec![(4, 2)]);
+        assert_eq!(dag.iter_edges(3).count(), 0);
 
         dag.clear();
 
         assert!(dag.array.is_empty());
         assert_eq!(dag.len(), 0);
 
-        dag.start();
-        dag.insert(2, 3);
-        dag.commit();
+        dag.push_edge(0, 2, 3);
+        dag.finish(1);
         let edges: Vec<(usize, i32)> = dag.iter_edges(0).collect();
         assert_eq!(edges, vec![(2, 3)]);
     }
