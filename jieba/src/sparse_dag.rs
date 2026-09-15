@@ -37,29 +37,6 @@ fn decode_edge(val: u64) -> (usize, i32) {
     (byte_end, word_id)
 }
 
-pub struct EdgeIter<'a> {
-    edges: &'a [u64],
-    cursor: usize,
-}
-
-impl Iterator for EdgeIter<'_> {
-    type Item = (usize, i32);
-
-    #[inline]
-    fn next(&mut self) -> Option<Self::Item> {
-        // Every list is 0-terminated, so the cursor stops on the sentinel.
-        let val = self.edges[self.cursor];
-        if val == 0 {
-            None
-        } else {
-            self.cursor += 1;
-            Some(decode_edge(val))
-        }
-    }
-}
-
-impl std::iter::FusedIterator for EdgeIter<'_> {}
-
 /// word_id sentinel meaning "no dictionary match"
 pub(crate) const NO_MATCH: i32 = i32::MIN;
 
@@ -115,17 +92,15 @@ impl StaticSparseDAG {
 
     /// Edges of the `char_idx`-th character.
     #[inline]
-    pub(crate) fn iter_edges(&self, char_idx: usize) -> EdgeIter<'_> {
-        assert!(
-            char_idx < self.start_pos.len(),
-            "iter_edges: character {char_idx} out of bounds (len {})",
-            self.start_pos.len()
-        );
-
-        EdgeIter {
-            edges: &self.array,
-            cursor: self.start_pos[char_idx],
-        }
+    pub(crate) fn iter_edges(&self, char_idx: usize) -> impl Iterator<Item = (usize, i32)> + '_ {
+        // Lists are laid out back to back, each followed by its sentinel,
+        // so a list runs from its start to just before the next one's.
+        let start = self.start_pos[char_idx];
+        let end = self
+            .start_pos
+            .get(char_idx + 1)
+            .map_or(self.array.len() - 1, |&next| next - 1);
+        self.array[start..end].iter().map(|&val| decode_edge(val))
     }
 
     pub(crate) fn clear(&mut self) {
