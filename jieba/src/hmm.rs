@@ -141,15 +141,20 @@ pub enum State {
 // Mapping representing the allow transitiongs into the given state.
 //
 // WARNING: Ordering must match the indicies in State.
+//
+// Within each row the states are in ascending index order. `viterbi` lets
+// the second candidate win an equal score, so this order is what makes a tie
+// go to the state with the larger index, as the original comparison of
+// `(score, State)` pairs did.
 static ALLOWED_PREV_STATUS: [[State; 2]; NUM_STATES] = [
     // Can preceed State::Begin
     [State::End, State::Single],
     // Can preceed State::End
     [State::Begin, State::Middle],
     // Can preceed State::Middle
-    [State::Middle, State::Begin],
+    [State::Begin, State::Middle],
     // Can preceed State::Single
-    [State::Single, State::End],
+    [State::End, State::Single],
 ];
 
 generate_hmm_data!();
@@ -236,7 +241,8 @@ fn viterbi(sentence: &str, params: &impl HmmParams, hmm_context: &mut HmmContext
             let [y0, y1] = ALLOWED_PREV_STATUS[y];
             let prob0 = prev_v[y0 as usize] + params.trans_prob(y0 as usize, y) + em_prob;
             let prob1 = prev_v[y1 as usize] + params.trans_prob(y1 as usize, y) + em_prob;
-            // The later candidate wins ties, as `Iterator::max_by` does.
+            // On a tie the second candidate wins; `ALLOWED_PREV_STATUS` lists
+            // it as the state with the larger index.
             let (prob, state) = if prob0 > prob1 { (prob0, y0) } else { (prob1, y1) };
             curr_v[y] = prob;
             prev[t * R + y] = Some(state);
@@ -470,6 +476,20 @@ mod tests {
             r#"[Begin, End, Begin, End, Begin, Middle, End, Begin, End, Begin, Middle, End, Begin, End, Single]"#
         ]]
         .assert_eq(&format!("{:?}", hmm_context.best_path));
+    }
+
+    /// Characters without emission data score every state the same, so the
+    /// path is decided by tie-breaking alone: an equal score goes to the
+    /// state with the larger index (`Single` over `End`, `Middle` over
+    /// `Begin`), which keeps such runs as single characters.
+    #[test]
+    fn test_hmm_cut_ties_go_to_the_higher_state() {
+        let mut words = Vec::new();
+        cut("龘龘龘", &mut words);
+        expect![[r#"["龘", "龘", "龘"]"#]].assert_eq(&format!("{:?}", words));
+        words.clear();
+        cut("龘龘龘龘龘", &mut words);
+        expect![[r#"["龘", "龘", "龘", "龘", "龘"]"#]].assert_eq(&format!("{:?}", words));
     }
 
     #[test]
