@@ -9,7 +9,7 @@ use crate::errors::Error;
 use jieba_macros::generate_hmm_data;
 
 thread_local! {
-    static RE_SKIP: Regex = Regex::new(r"([a-zA-Z0-9]+(?:.\d+)?%?)").unwrap();
+    static RE_SKIP: Regex = Regex::new(r"([a-zA-Z0-9]+(?:\.\d+)?%?)").unwrap();
 }
 
 /// HMM-specific CJK range `[\u{4E00}-\u{9FD5}]`
@@ -440,5 +440,30 @@ mod tests {
         let mut words = Vec::with_capacity(sentence.chars().count() / 2);
         cut(sentence, &mut words);
         expect![[r#"["小明", "硕士", "毕业于", "中国", "科学院", "计算", "所"]"#]].assert_eq(&format!("{:?}", words));
+    }
+
+    /// The separator in `RE_SKIP` is a literal dot, as in upstream jieba
+    /// (`jieba/finalseg/__init__.py`: `([a-zA-Z0-9]+(?:\.\d+)?%?)`).
+    ///
+    /// While the dot was unescaped it matched any character, so a single
+    /// non-alphanumeric byte was absorbed into the preceding token whenever
+    /// digits followed it: `WES-5.4.5` came out as `WES-5`, `.`, `4.5`, and
+    /// `G260911-0711` was kept whole while `ISU-CNS24093` was split.
+    #[test]
+    fn test_hmm_cut_skip_separator_is_literal_dot() {
+        let mut got = Vec::new();
+        for sentence in ["1.0", "WES-5.4.5", "G260911-0711", "ISU-CNS24093", "3.14", "50%"] {
+            let mut words = Vec::new();
+            cut(sentence, &mut words);
+            got.push(format!("{} -> {:?}", sentence, words));
+        }
+        expect![[r#"
+            1.0 -> ["1.0"]
+            WES-5.4.5 -> ["WES", "-", "5.4", ".", "5"]
+            G260911-0711 -> ["G260911", "-", "0711"]
+            ISU-CNS24093 -> ["ISU", "-", "CNS24093"]
+            3.14 -> ["3.14"]
+            50% -> ["50%"]"#]]
+        .assert_eq(&got.join("\n"));
     }
 }
