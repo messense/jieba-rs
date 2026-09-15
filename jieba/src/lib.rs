@@ -128,10 +128,14 @@ impl Scratch {
     /// Drop buffers that a very large input grew, so a thread that once
     /// segmented a huge block does not pin that memory forever.
     fn release_if_huge(&mut self) {
-        const MAX_RETAINED_ROUTE: usize = 1 << 20;
-        if self.route.capacity() > MAX_RETAINED_ROUTE {
-            self.route = Vec::new();
+        const MAX_RETAINED_BYTES: usize = 4 << 20;
+        fn release<T>(buf: &mut Vec<T>) {
+            if buf.capacity() * std::mem::size_of::<T>() > MAX_RETAINED_BYTES {
+                *buf = Vec::new();
+            }
         }
+        release(&mut self.route);
+        release(&mut self.chars);
         self.dag.release_if_huge();
     }
 }
