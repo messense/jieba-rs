@@ -61,7 +61,10 @@ pub fn generate_hmm_data(_input: TokenStream) -> TokenStream {
     let min_char = in_range.first().map_or(HMM_HAN_MIN, |(ch, _)| *ch);
     let max_char = in_range.last().map_or(HMM_HAN_MIN, |(ch, _)| *ch);
     let index_len = (max_char - min_char + 1) as usize;
-    assert!(in_range.len() < u16::MAX as usize, "too many HMM emission entries for a u16 index");
+    assert!(
+        in_range.len() < u16::MAX as usize,
+        "too many HMM emission entries for a u16 index"
+    );
 
     let mut index = vec![u16::MAX; index_len];
     for (row, (ch, _)) in in_range.iter().enumerate() {

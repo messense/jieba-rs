@@ -266,7 +266,7 @@ fn viterbi(sentence: &str, params: &impl HmmParams, hmm_context: &mut HmmContext
 #[allow(non_snake_case)]
 fn cut_internal<'a>(
     sentence: &'a str,
-    words: &mut Vec<&'a str>,
+    words: &mut impl FnMut(&'a str),
     params: &impl HmmParams,
     hmm_context: &mut HmmContext,
 ) {
@@ -282,13 +282,13 @@ fn cut_internal<'a>(
             State::End => {
                 let byte_start = begin;
                 let byte_end = hmm_context.chars.get(i + 1).map_or(str_len, |&(offset, _)| offset);
-                words.push(&sentence[byte_start..byte_end]);
+                words(&sentence[byte_start..byte_end]);
                 next_byte_offset = byte_end;
             }
             State::Single => {
                 let byte_start = curr_byte_offset;
                 let byte_end = hmm_context.chars.get(i + 1).map_or(str_len, |&(offset, _)| offset);
-                words.push(&sentence[byte_start..byte_end]);
+                words(&sentence[byte_start..byte_end]);
                 next_byte_offset = byte_end;
             }
             State::Middle => { /* do nothing */ }
@@ -297,14 +297,14 @@ fn cut_internal<'a>(
 
     if next_byte_offset < str_len {
         let byte_start = next_byte_offset;
-        words.push(&sentence[byte_start..]);
+        words(&sentence[byte_start..]);
     }
 }
 
 #[allow(non_snake_case)]
 pub(crate) fn cut_with_allocated_memory<'a>(
     sentence: &'a str,
-    words: &mut Vec<&'a str>,
+    words: &mut impl FnMut(&'a str),
     params: &impl HmmParams,
     hmm_context: &mut HmmContext,
 ) {
@@ -318,14 +318,14 @@ pub(crate) fn cut_with_allocated_memory<'a>(
             if block.chars().nth(1).is_some() {
                 cut_internal(block, words, params, hmm_context);
             } else {
-                words.push(block);
+                words(block);
             }
         } else {
             for x in HmmSkipSplitter::new(block) {
                 if x.is_empty() {
                     continue;
                 }
-                words.push(x);
+                words(x);
             }
         }
     }
@@ -457,7 +457,7 @@ mod tests {
     fn cut<'a>(sentence: &'a str, words: &mut Vec<&'a str>) {
         let mut hmm_context = HmmContext::default();
 
-        cut_with_allocated_memory(sentence, words, &BuiltinHmm, &mut hmm_context)
+        cut_with_allocated_memory(sentence, &mut |word| words.push(word), &BuiltinHmm, &mut hmm_context)
     }
     #[test]
     #[allow(non_snake_case)]

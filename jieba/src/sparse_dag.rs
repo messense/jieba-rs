@@ -1,10 +1,14 @@
+/// Word candidates of one block, as edges `byte_start -> byte_end` carrying
+/// the dictionary id of the word they span.
+///
+/// Edges are appended block by block in increasing `byte_start` order:
+/// `start(from)` opens the edge list of a position, `insert` appends to it,
+/// and `commit` terminates it with a 0 sentinel.
+#[derive(Default)]
 pub(crate) struct StaticSparseDAG {
     array: Vec<u64>,
     /// Maps byte offset → index into `array`. Uses `usize::MAX` as sentinel for "no entry".
     start_pos: Vec<usize>,
-    touched_start_pos: Vec<usize>,
-    size_hint_for_iterator: usize,
-    curr_insertion_len: usize,
 }
 
 const NO_ENTRY: usize = usize::MAX;
@@ -33,30 +37,23 @@ fn decode_edge(val: u64) -> (usize, i32) {
 }
 
 pub struct EdgeIter<'a> {
-    dag: &'a StaticSparseDAG,
+    edges: &'a [u64],
     cursor: usize,
-    done: bool,
 }
 
 impl Iterator for EdgeIter<'_> {
     type Item = (usize, i32);
 
+    #[inline]
     fn next(&mut self) -> Option<Self::Item> {
-        if self.done {
-            return None;
-        }
-        let val = self.dag.array[self.cursor];
+        // Every list is 0-terminated, so the cursor stops on the sentinel.
+        let val = self.edges[self.cursor];
         if val == 0 {
-            self.done = true;
             None
         } else {
             self.cursor += 1;
             Some(decode_edge(val))
         }
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        (0, Some(self.dag.size_hint_for_iterator))
     }
 }
 
@@ -66,45 +63,34 @@ impl std::iter::FusedIterator for EdgeIter<'_> {}
 pub(crate) const NO_MATCH: i32 = i32::MIN;
 
 impl StaticSparseDAG {
-    pub(crate) fn with_size_hint(hint: usize) -> Self {
-        const MAX_CAPACITY: usize = 4_000_000;
-        const MULTIPLIER: usize = 4;
-        const MIN_CAPACITY: usize = 32;
-
-        let capacity = (hint * MULTIPLIER).clamp(MIN_CAPACITY, MAX_CAPACITY);
-        let start_pos_len = hint.min(MAX_CAPACITY) + 1;
-
-        StaticSparseDAG {
-            array: Vec::with_capacity(capacity),
-            start_pos: vec![NO_ENTRY; start_pos_len],
-            touched_start_pos: Vec::with_capacity(MIN_CAPACITY),
-            size_hint_for_iterator: 0,
-            curr_insertion_len: 0,
+    /// Drop the edge storage if a very large block grew it past what is
+    /// worth keeping around between calls.
+    pub(crate) fn release_if_huge(&mut self) {
+        const MAX_RETAINED_EDGES: usize = 4_000_000;
+        if self.array.capacity() > MAX_RETAINED_EDGES {
+            self.array = Vec::new();
+            self.start_pos = Vec::new();
         }
     }
 
     #[inline]
     pub(crate) fn start(&mut self, from: usize) {
+        debug_assert!(from >= self.start_pos.len(), "start offsets must increase");
         let idx = self.array.len();
-        self.curr_insertion_len = 0;
-        if from >= self.start_pos.len() {
-            self.start_pos.resize(from + 1, NO_ENTRY);
-        }
-        if self.start_pos[from] == NO_ENTRY {
-            self.touched_start_pos.push(from);
-        }
+        // Offsets are opened in increasing order, so the table only ever
+        // grows at the end; the gap is the continuation bytes of the
+        // previous character.
+        self.start_pos.resize(from + 1, NO_ENTRY);
         self.start_pos[from] = idx;
     }
 
     #[inline]
     pub(crate) fn insert(&mut self, to: usize, word_id: i32) {
-        self.curr_insertion_len += 1;
         self.array.push(encode_edge(to, word_id));
     }
 
     #[inline]
     pub(crate) fn commit(&mut self) {
-        self.size_hint_for_iterator = std::cmp::max(self.curr_insertion_len, self.size_hint_for_iterator);
         self.array.push(0);
     }
 
@@ -122,17 +108,14 @@ impl StaticSparseDAG {
         );
 
         EdgeIter {
-            dag: self,
+            edges: &self.array,
             cursor,
-            done: false,
         }
     }
 
     pub(crate) fn clear(&mut self) {
         self.array.clear();
-        for from in self.touched_start_pos.drain(..) {
-            self.start_pos[from] = NO_ENTRY;
-        }
+        self.start_pos.clear();
     }
 }
 
@@ -142,7 +125,7 @@ mod tests {
 
     #[test]
     fn test_static_sparse_dag() {
-        let mut dag = StaticSparseDAG::with_size_hint(5);
+        let mut dag = StaticSparseDAG::default();
         let mut ans: Vec<Vec<usize>> = vec![Vec::new(); 5];
         for (i, item) in ans.iter_mut().enumerate().take(4) {
             dag.start(i);
@@ -154,8 +137,6 @@ mod tests {
             dag.commit()
         }
 
-        assert_eq!(dag.size_hint_for_iterator, 4);
-
         for (i, item) in ans.iter().enumerate().take(4) {
             let edges: Vec<usize> = dag.iter_edges(i).map(|(to, _)| to).collect();
             assert_eq!(item, &edges);
@@ -164,7 +145,7 @@ mod tests {
 
     #[test]
     fn test_clear_resets_touched_offsets() {
-        let mut dag = StaticSparseDAG::with_size_hint(2);
+        let mut dag = StaticSparseDAG::default();
 
         dag.start(0);
         dag.insert(1, 1);
@@ -179,8 +160,12 @@ mod tests {
         dag.clear();
 
         assert!(dag.array.is_empty());
-        assert!(dag.touched_start_pos.is_empty());
-        assert_eq!(dag.start_pos[0], NO_ENTRY);
-        assert_eq!(dag.start_pos[3], NO_ENTRY);
+        assert!(dag.start_pos.is_empty());
+
+        dag.start(0);
+        dag.insert(2, 3);
+        dag.commit();
+        let edges: Vec<(usize, i32)> = dag.iter_edges(0).collect();
+        assert_eq!(edges, vec![(2, 3)]);
     }
 }

@@ -300,7 +300,11 @@ fn viterbi_posseg<'a>(data: &'a PossegData, scratch: &mut Scratch, mut emit: imp
 
         let (prev_scores, cur_scores) = {
             let (a, b) = scores.split_at_mut(1);
-            if t % 2 == 1 { (&a[0], &mut b[0]) } else { (&b[0], &mut a[0]) }
+            if t % 2 == 1 {
+                (&a[0], &mut b[0])
+            } else {
+                (&b[0], &mut a[0])
+            }
         };
         // Only candidate entries are ever written; reset the ones this buffer
         // received two steps ago instead of clearing all NUM_STATES slots.
@@ -431,7 +435,9 @@ fn cut_with_pos(sentence: &str) -> Vec<(&str, &'static str)> {
         let mut scratch = scratch.borrow_mut();
         scratch.chars.clear();
         scratch.chars.extend(sentence.char_indices());
-        viterbi_posseg(data, &mut scratch, |(start, end, tag)| spans.push((&sentence[start..end], tag)));
+        viterbi_posseg(data, &mut scratch, |(start, end, tag)| {
+            spans.push((&sentence[start..end], tag))
+        });
     });
     spans
 }
@@ -503,7 +509,14 @@ mod tests {
 
     #[test]
     fn test_guess_tag_matches_longest_span() {
-        for word in ["张尧", "小明硕士毕业于中国科学院计算所", "云计算", "我", "创新办", "龘齉"] {
+        for word in [
+            "张尧",
+            "小明硕士毕业于中国科学院计算所",
+            "云计算",
+            "我",
+            "创新办",
+            "龘齉",
+        ] {
             let spans = cut_with_pos(word);
             let expected = spans.iter().max_by_key(|(w, _)| w.len()).map_or("x", |(_, t)| t);
             assert_eq!(guess_tag(word), expected, "{word}");
