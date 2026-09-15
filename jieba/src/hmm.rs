@@ -1,4 +1,3 @@
-use std::cmp::Ordering;
 use std::io::BufRead;
 
 use crate::FxHashMap;
@@ -179,7 +178,12 @@ impl HmmParams for BuiltinHmm {
 
     #[inline]
     fn emit_probs(&self, ch: char) -> [f64; NUM_STATES] {
-        EMIT_PROBS.get(&ch).copied().unwrap_or([MIN_FLOAT; NUM_STATES])
+        // Two dependent loads from static tables; no hashing.
+        let offset = (ch as u32).wrapping_sub(EMIT_MIN_CHAR) as usize;
+        match EMIT_INDEX.get(offset) {
+            Some(&row) if row != EMIT_NONE => EMIT_PROBS[row as usize],
+            _ => [MIN_FLOAT; NUM_STATES],
+        }
     }
 }
 
@@ -191,11 +195,9 @@ pub(crate) struct HmmContext {
     chars: Vec<(usize, char)>,
 }
 
-#[allow(non_snake_case, clippy::needless_range_loop)]
+#[allow(non_snake_case)]
 fn viterbi(sentence: &str, params: &impl HmmParams, hmm_context: &mut HmmContext) {
-    let states = [State::Begin, State::Middle, State::End, State::Single];
-    #[allow(non_snake_case)]
-    let R = states.len();
+    const R: usize = NUM_STATES;
 
     // Collect char byte offsets into reusable scratch space, derive C from the length.
     hmm_context.chars.clear();
@@ -217,47 +219,42 @@ fn viterbi(sentence: &str, params: &impl HmmParams, hmm_context: &mut HmmContext
         hmm_context.best_path.resize(C, State::Begin);
     }
 
-    let first_char = chars[0].1;
-    let emit_probs = params.emit_probs(first_char);
-    for y in &states {
-        let prob = params.initial_prob(*y as usize) + emit_probs[*y as usize];
-        hmm_context.v[*y as usize] = prob;
+    let v = &mut hmm_context.v;
+    let prev = &mut hmm_context.prev;
+
+    let emit_probs = params.emit_probs(chars[0].1);
+    for y in 0..R {
+        v[y] = params.initial_prob(y) + emit_probs[y];
     }
 
     for t in 1..C {
-        let ch = chars[t].1;
-        let emit_probs = params.emit_probs(ch);
-        for y in &states {
-            let em_prob = emit_probs[*y as usize];
-            let (prob, state) = ALLOWED_PREV_STATUS[*y as usize]
-                .iter()
-                .map(|y0| {
-                    (
-                        hmm_context.v[(t - 1) * R + (*y0 as usize)]
-                            + params.trans_prob(*y0 as usize, *y as usize)
-                            + em_prob,
-                        *y0,
-                    )
-                })
-                .max_by(|x, y| x.partial_cmp(y).unwrap_or(Ordering::Equal))
-                .unwrap();
-            let idx = (t * R) + (*y as usize);
-            hmm_context.v[idx] = prob;
-            hmm_context.prev[idx] = Some(state);
+        let emit_probs = params.emit_probs(chars[t].1);
+        let (prev_v, curr_v) = v.split_at_mut(t * R);
+        let prev_v = &prev_v[(t - 1) * R..];
+        for y in 0..R {
+            let em_prob = emit_probs[y];
+            let [y0, y1] = ALLOWED_PREV_STATUS[y];
+            let prob0 = prev_v[y0 as usize] + params.trans_prob(y0 as usize, y) + em_prob;
+            let prob1 = prev_v[y1 as usize] + params.trans_prob(y1 as usize, y) + em_prob;
+            // The later candidate wins ties, as `Iterator::max_by` does.
+            let (prob, state) = if prob0 > prob1 { (prob0, y0) } else { (prob1, y1) };
+            curr_v[y] = prob;
+            prev[t * R + y] = Some(state);
         }
     }
 
-    let (_prob, state) = [State::End, State::Single]
-        .iter()
-        .map(|y| (hmm_context.v[(C - 1) * R + (*y as usize)], y))
-        .max_by(|x, y| x.partial_cmp(y).unwrap_or(Ordering::Equal))
-        .unwrap();
+    let last_v = &v[(C - 1) * R..C * R];
+    let state = if last_v[State::End as usize] > last_v[State::Single as usize] {
+        State::End
+    } else {
+        State::Single
+    };
 
     let mut t = C - 1;
-    let mut curr = *state;
+    let mut curr = state;
 
-    hmm_context.best_path[t] = *state;
-    while let Some(p) = hmm_context.prev[t * R + (curr as usize)] {
+    hmm_context.best_path[t] = state;
+    while let Some(p) = prev[t * R + (curr as usize)] {
         assert!(t > 0);
         hmm_context.best_path[t - 1] = p;
         curr = p;

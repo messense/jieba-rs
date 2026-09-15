@@ -27,7 +27,6 @@ cedarwood = { workspace = true }
 rustc-hash = { workspace = true }
 include-flate = { workspace = true, optional = true }
 ordered-float = { workspace = true, optional = true }
-phf = { workspace = true }
 
 [dev-dependencies]
 codspeed-criterion-compat = { workspace = true }

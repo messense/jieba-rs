@@ -14,5 +14,3 @@ repository.workspace = true
 [lib]
 proc-macro = true
 
-[dependencies]
-phf_codegen = { workspace = true }
