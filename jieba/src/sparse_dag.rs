@@ -1,17 +1,17 @@
-/// Word candidates of one block, as edges `byte_start -> byte_end` carrying
-/// the dictionary id of the word they span.
+/// Word candidates of one block, as edges from a character to the byte
+/// offset where a dictionary word starting there ends, carrying the id of
+/// that word.
 ///
-/// Edges are appended block by block in increasing `byte_start` order:
-/// `start(from)` opens the edge list of a position, `insert` appends to it,
-/// and `commit` terminates it with a 0 sentinel.
+/// Positions are the block's characters in order: `start()` opens the edge
+/// list of the next character, `insert` appends to it, and `commit`
+/// terminates it with a 0 sentinel. Lists are then read back by character
+/// index.
 #[derive(Default)]
 pub(crate) struct StaticSparseDAG {
     array: Vec<u64>,
-    /// Maps byte offset → index into `array`. Uses `usize::MAX` as sentinel for "no entry".
+    /// Maps character index → index into `array`.
     start_pos: Vec<usize>,
 }
-
-const NO_ENTRY: usize = usize::MAX;
 
 /// Maximum byte_end value that can be encoded in the upper 32 bits of a u64.
 const MAX_ENCODED_BYTE_END: usize = u32::MAX as usize - 1;
@@ -73,15 +73,16 @@ impl StaticSparseDAG {
         }
     }
 
+    /// Open the edge list of the next character.
     #[inline]
-    pub(crate) fn start(&mut self, from: usize) {
-        debug_assert!(from >= self.start_pos.len(), "start offsets must increase");
-        let idx = self.array.len();
-        // Offsets are opened in increasing order, so the table only ever
-        // grows at the end; the gap is the continuation bytes of the
-        // previous character.
-        self.start_pos.resize(from + 1, NO_ENTRY);
-        self.start_pos[from] = idx;
+    pub(crate) fn start(&mut self) {
+        self.start_pos.push(self.array.len());
+    }
+
+    /// Number of characters whose edge lists have been opened.
+    #[inline]
+    pub(crate) fn len(&self) -> usize {
+        self.start_pos.len()
     }
 
     #[inline]
@@ -94,22 +95,18 @@ impl StaticSparseDAG {
         self.array.push(0);
     }
 
+    /// Edges of the `char_idx`-th character.
     #[inline]
-    pub(crate) fn iter_edges(&self, from: usize) -> EdgeIter<'_> {
+    pub(crate) fn iter_edges(&self, char_idx: usize) -> EdgeIter<'_> {
         assert!(
-            from < self.start_pos.len(),
-            "iter_edges: byte offset {from} out of bounds (len {})",
+            char_idx < self.start_pos.len(),
+            "iter_edges: character {char_idx} out of bounds (len {})",
             self.start_pos.len()
-        );
-        let cursor = self.start_pos[from];
-        assert!(
-            cursor != NO_ENTRY,
-            "iter_edges: byte offset {from} was never recorded via start()"
         );
 
         EdgeIter {
             edges: &self.array,
-            cursor,
+            cursor: self.start_pos[char_idx],
         }
     }
 
@@ -128,7 +125,7 @@ mod tests {
         let mut dag = StaticSparseDAG::default();
         let mut ans: Vec<Vec<usize>> = vec![Vec::new(); 5];
         for (i, item) in ans.iter_mut().enumerate().take(4) {
-            dag.start(i);
+            dag.start();
             for j in (i + 1)..=4 {
                 item.push(j);
                 dag.insert(j, j as i32);
@@ -147,22 +144,20 @@ mod tests {
     fn test_clear_resets_touched_offsets() {
         let mut dag = StaticSparseDAG::default();
 
-        dag.start(0);
+        dag.start();
         dag.insert(1, 1);
         dag.commit();
-        dag.start(3);
+        dag.start();
         dag.insert(4, 2);
         dag.commit();
-
-        assert_ne!(dag.start_pos[0], NO_ENTRY);
-        assert_ne!(dag.start_pos[3], NO_ENTRY);
+        assert_eq!(dag.len(), 2);
 
         dag.clear();
 
         assert!(dag.array.is_empty());
-        assert!(dag.start_pos.is_empty());
+        assert_eq!(dag.len(), 0);
 
-        dag.start(0);
+        dag.start();
         dag.insert(2, 3);
         dag.commit();
         let edges: Vec<(usize, i32)> = dag.iter_edges(0).collect();
