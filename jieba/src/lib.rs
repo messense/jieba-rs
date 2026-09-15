@@ -269,34 +269,24 @@ pub struct Tag<'a> {
     pub byte_end: usize,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 struct Record {
     freq: usize,
-    log_freq: f64,
-    tag: Box<str>,
-}
-
-impl Record {
-    #[inline(always)]
-    fn new(freq: usize, tag: Box<str>) -> Self {
-        Self {
-            freq,
-            log_freq: (freq as f64).ln(),
-            tag,
-        }
-    }
-
-    #[inline]
-    fn set_freq(&mut self, freq: usize) {
-        self.freq = freq;
-        self.log_freq = (freq as f64).ln();
-    }
+    /// Index into `Jieba::tags`.
+    tag: u32,
 }
 
 /// Jieba segmentation
 #[derive(Clone)]
 pub struct Jieba {
     records: Vec<Record>,
+    /// `ln(freq)` of each record, kept apart from `records` so the route
+    /// calculation touches a dense `f64` array rather than whole records.
+    log_freqs: Vec<f64>,
+    /// Distinct POS tags; records refer to them by index. A dictionary has
+    /// only a few dozen tags, so this replaces one heap string per word.
+    tags: Vec<Box<str>>,
+    tag_ids: FxHashMap<Box<str>, u32>,
     cedar: Cedar,
     total: usize,
     log_total: f64,
@@ -324,6 +314,9 @@ impl Jieba {
     pub fn empty() -> Self {
         Jieba {
             records: Vec::new(),
+            log_freqs: Vec::new(),
+            tags: Vec::new(),
+            tag_ids: FxHashMap::default(),
             cedar: Cedar::new(),
             total: 0,
             log_total: 0.0f64.ln(),
@@ -370,14 +363,25 @@ impl Jieba {
     /// ```
     #[cfg(feature = "default-dict")]
     pub fn load_default_dict(&mut self) {
-        use std::io::BufReader;
-
-        let mut default_dict = BufReader::new(DEFAULT_DICT.as_bytes());
-        if self.records.is_empty() {
-            self.load_unique_dict(&mut default_dict).unwrap();
-        } else {
-            self.load_dict(&mut default_dict).unwrap();
+        // The embedded dictionary is a well-formed `word freq tag` list, so it
+        // is parsed straight from the string, with no per-line copy or UTF-8
+        // re-validation, and never checked for duplicates when it is the
+        // first thing loaded.
+        let dict: &str = &DEFAULT_DICT;
+        let check_duplicates = !self.records.is_empty();
+        if !check_duplicates {
+            let lines = bytecount::count(dict.as_bytes(), b'\n') + 1;
+            self.records.reserve(lines);
+            self.log_freqs.reserve(lines);
         }
+        for line in dict.lines() {
+            let mut iter = line.split_ascii_whitespace();
+            let Some(word) = iter.next() else { continue };
+            let freq = iter.next().map_or(0, |x| x.parse::<usize>().expect("invalid frequency in default dict"));
+            let tag = iter.next().unwrap_or("");
+            self.load_entry(word, freq, tag, check_duplicates);
+        }
+        self.finish_load();
     }
 
     /// Set a custom HMM model for segmentation.
@@ -426,6 +430,9 @@ impl Jieba {
     /// ```
     pub fn clear(&mut self) {
         self.records.clear();
+        self.log_freqs.clear();
+        self.tags.clear();
+        self.tag_ids.clear();
         self.cedar = Cedar::new();
         self.total = 0;
         self.update_log_total();
@@ -446,22 +453,65 @@ impl Jieba {
         match self.cedar.exact_match_search(word) {
             Some((word_id, _, _)) => {
                 let old_freq = self.records[word_id as usize].freq;
-                self.records[word_id as usize].set_freq(freq);
+                self.set_freq(word_id as usize, freq);
 
                 self.total += freq;
                 self.total -= old_freq;
             }
             None => {
-                let word_id = self.records.len() as i32;
-                self.records.push(Record::new(freq, tag.into()));
-
-                self.cedar.update(word, word_id);
+                self.push_record(word, freq, tag);
                 self.total += freq;
             }
         };
         self.update_log_total();
 
         freq
+    }
+
+    #[inline]
+    fn set_freq(&mut self, word_id: usize, freq: usize) {
+        self.records[word_id].freq = freq;
+        self.log_freqs[word_id] = (freq as f64).ln();
+    }
+
+    #[inline]
+    fn intern_tag(&mut self, tag: &str) -> u32 {
+        if let Some(&id) = self.tag_ids.get(tag) {
+            return id;
+        }
+        let id = self.tags.len() as u32;
+        self.tags.push(tag.into());
+        self.tag_ids.insert(tag.into(), id);
+        id
+    }
+
+    /// Append a word the dictionary does not contain yet.
+    #[inline]
+    fn push_record(&mut self, word: &str, freq: usize, tag: &str) {
+        let word_id = self.records.len() as i32;
+        let tag = self.intern_tag(tag);
+        self.records.push(Record { freq, tag });
+        self.log_freqs.push((freq as f64).ln());
+        self.cedar.update(word, word_id);
+    }
+
+    /// Add one dictionary entry; with `check_duplicates` an existing word only
+    /// has its frequency replaced.
+    #[inline]
+    fn load_entry(&mut self, word: &str, freq: usize, tag: &str, check_duplicates: bool) {
+        if check_duplicates {
+            match self.cedar.exact_match_search(word) {
+                Some((word_id, _, _)) => self.set_freq(word_id as usize, freq),
+                None => self.push_record(word, freq, tag),
+            }
+        } else {
+            self.push_record(word, freq, tag);
+        }
+    }
+
+    fn finish_load(&mut self) {
+        self.total = self.records.iter().map(|n| n.freq).sum();
+        self.update_log_total();
     }
 
     /// Checks if a word exists in the dictionary.
@@ -501,14 +551,10 @@ impl Jieba {
     /// * There is an issue reading from the provided `BufRead` source.
     /// * A line in the dictionary file contains invalid frequency data (not a valid integer).
     pub fn load_dict<R: BufRead>(&mut self, dict: &mut R) -> Result<(), Error> {
-        self.load_dict_inner(dict, true)
+        self.load_dict_inner(dict)
     }
 
-    fn load_unique_dict<R: BufRead>(&mut self, dict: &mut R) -> Result<(), Error> {
-        self.load_dict_inner(dict, false)
-    }
-
-    fn load_dict_inner<R: BufRead>(&mut self, dict: &mut R, check_duplicates: bool) -> Result<(), Error> {
+    fn load_dict_inner<R: BufRead>(&mut self, dict: &mut R) -> Result<(), Error> {
         let mut buf = String::new();
         self.total = 0;
 
@@ -529,29 +575,12 @@ impl Jieba {
                         })
                         .unwrap_or(Ok(0))?;
                     let tag = iter.next().unwrap_or("");
-
-                    if check_duplicates {
-                        match self.cedar.exact_match_search(word) {
-                            Some((word_id, _, _)) => {
-                                self.records[word_id as usize].set_freq(freq);
-                            }
-                            None => {
-                                let word_id = self.records.len() as i32;
-                                self.records.push(Record::new(freq, tag.into()));
-                                self.cedar.update(word, word_id);
-                            }
-                        };
-                    } else {
-                        let word_id = self.records.len() as i32;
-                        self.records.push(Record::new(freq, tag.into()));
-                        self.cedar.update(word, word_id);
-                    }
+                    self.load_entry(word, freq, tag, true);
                 }
             }
             buf.clear();
         }
-        self.total = self.records.iter().map(|n| n.freq).sum();
-        self.update_log_total();
+        self.finish_load();
 
         Ok(())
     }
@@ -593,7 +622,7 @@ impl Jieba {
             let mut best = None;
             for (byte_end, word_id) in dag.iter_edges(byte_start) {
                 let log_freq = if word_id != sparse_dag::NO_MATCH {
-                    self.records[word_id as usize].log_freq
+                    self.log_freqs[word_id as usize]
                 } else {
                     0.0 // ln(1)
                 };
@@ -1061,7 +1090,7 @@ impl Jieba {
             .map(|token| {
                 let word = token.word;
                 if let Some((word_id, _, _)) = self.cedar.exact_match_search(word) {
-                    let t = &self.records[word_id as usize].tag;
+                    let t = &self.tags[self.records[word_id as usize].tag as usize];
                     return Tag {
                         word,
                         tag: t,
