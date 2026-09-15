@@ -7,19 +7,29 @@
 //! walk is a cache-resident array load. Every other transition is one entry
 //! in an open-addressing hash table keyed by `(parent node, character)`, and
 //! the entry carries everything a walk needs to know about the child: its
-//! id, whether it has children of its own, and the id of the word that ends
-//! there. One probe per character, and no separate lookup to test for a
-//! word boundary, against the several dependent loads per *byte* of a
-//! byte-level double-array trie.
+//! id, the id of the word that ends there, and a small Bloom-style filter of
+//! the characters its own children start with. One probe per character, no
+//! separate lookup to test for a word boundary, and no probe at all for the
+//! common case of a character that is not a child, against the several
+//! dependent loads per *byte* of a byte-level double-array trie.
 
 /// Word id stored on a node that does not end a dictionary word.
 const NO_WORD: i32 = -1;
 
-/// Set in a child pointer when that node has children.
-const HAS_CHILDREN: u32 = 1 << 31;
-
 /// Widest character the key packing allows: 21 bits, all of Unicode.
 const CHAR_BITS: u32 = 21;
+
+/// A slot key is `(parent << CHAR_BITS | char) + 1` in the low bits; the
+/// high 16 bits hold the first child filter.
+const KEY_BITS: u32 = 48;
+const KEY_MASK: u64 = (1 << KEY_BITS) - 1;
+
+/// A child pointer is the node id in the low bits and the second child
+/// filter in the high 8 bits. A node has children iff its filter bits are
+/// not all zero.
+const ID_BITS: u32 = 24;
+const ID_MASK: u32 = (1 << ID_BITS) - 1;
+const MAX_NODES: u32 = 1 << ID_BITS;
 
 /// Characters with a direct root transition.
 const ROOT_TABLE_LEN: usize = 0x1_0000;
@@ -31,14 +41,15 @@ const MAX_LOAD_EIGHTHS: usize = 6;
 
 #[derive(Clone, Copy, Default)]
 struct Slot {
-    /// Packed `(parent, char)` plus one; 0 marks an empty slot.
+    /// Packed `(parent, char)` plus one, and the first child filter; 0
+    /// marks an empty slot.
     key: u64,
-    /// Child node id, with [`HAS_CHILDREN`] set once it has children.
+    /// Child node id and the second child filter.
     child: u32,
     word_id: i32,
 }
 
-/// A transition out of the root: child node id (0 for none) and word id.
+/// A transition out of the root: child pointer (0 for none) and word id.
 #[derive(Clone, Copy)]
 struct RootEntry {
     child: u32,
@@ -76,6 +87,17 @@ pub(crate) struct CharTrie {
 #[inline(always)]
 fn key(parent: u32, ch: char) -> u64 {
     (((parent as u64) << CHAR_BITS) | ch as u64) + 1
+}
+
+/// The bits a character sets in a node's two child filters: one of 16 in
+/// the key's high bits, one of 8 in the child pointer's high bits. A
+/// lookup probes only when both are set; with the fan-out this dictionary
+/// has (median 1, p90 3) that rejects most characters that are not
+/// children without touching the hash table.
+#[inline(always)]
+fn filter_bits(ch: char) -> (u64, u32) {
+    let h = (ch as u32).wrapping_mul(0x9E37_79B1);
+    (1u64 << (KEY_BITS + (h >> 28)), 1u32 << (ID_BITS + ((h >> 25) & 7)))
 }
 
 impl Default for CharTrie {
@@ -121,44 +143,52 @@ impl CharTrie {
         (key.wrapping_mul(MULTIPLIER) >> self.shift) as usize
     }
 
-    /// Index of the slot holding `(parent, ch)`, or of the empty slot where
-    /// it would go.
+    /// Index of the slot holding the (filter-free) `key`, or of the empty
+    /// slot where it would go.
     #[inline(always)]
     fn probe(&self, key: u64) -> usize {
         let mask = self.slots.len() - 1;
         let mut i = self.index(key);
         loop {
-            let slot = &self.slots[i];
-            if slot.key == key || slot.key == 0 {
+            let stored = self.slots[i].key;
+            if stored & KEY_MASK == key || stored == 0 {
                 return i;
             }
             i = (i + 1) & mask;
         }
     }
 
-    /// Transition from `parent` on `ch`: `(child pointer, word id)`, or
-    /// `None` when there is no such prefix.
+    /// The root's transition on `ch`: `(child pointer, word id)`.
     #[inline(always)]
-    fn step(&self, parent: u32, ch: char) -> Option<(u32, i32)> {
-        if parent == 0 && (ch as usize) < ROOT_TABLE_LEN {
+    fn root_step(&self, ch: char) -> Option<(u32, i32)> {
+        if (ch as usize) < ROOT_TABLE_LEN {
             let entry = self.root[ch as usize];
             return (entry.child != 0).then_some((entry.child, entry.word_id));
         }
-        let slot = &self.slots[self.probe(key(parent, ch))];
+        let slot = &self.slots[self.probe(key(0, ch))];
         (slot.key != 0).then_some((slot.child, slot.word_id))
     }
 
     /// The id of `word`, if it is in the dictionary.
     pub(crate) fn get(&self, word: &str) -> Option<i32> {
-        let mut node = 0;
-        let mut word_id = NO_WORD;
-        for ch in word.chars() {
-            if node != 0 && node & HAS_CHILDREN == 0 {
+        let mut chars = word.chars();
+        let (mut child, mut word_id) = self.root_step(chars.next()?)?;
+        // The root has no key filter; only the pointer filter applies.
+        let mut key_filter = u64::MAX;
+        for ch in chars {
+            let (a, b) = filter_bits(ch);
+            if key_filter & a == 0 || child & b == 0 {
                 return None;
             }
-            (node, word_id) = self.step(node & !HAS_CHILDREN, ch)?;
+            let slot = &self.slots[self.probe(key(child & ID_MASK, ch))];
+            if slot.key == 0 {
+                return None;
+            }
+            key_filter = slot.key;
+            child = slot.child;
+            word_id = slot.word_id;
         }
-        (node != 0 && word_id != NO_WORD).then_some(word_id)
+        (word_id != NO_WORD).then_some(word_id)
     }
 
     /// Call `emit(char_index, byte_end, word_id)` for every dictionary word
@@ -186,32 +216,38 @@ impl CharTrie {
             if let Some(&[(_, c1), (_, c2)]) = chars.get(pos + LOOKAHEAD..pos + LOOKAHEAD + 2)
                 && (c1 as usize) < ROOT_TABLE_LEN
             {
-                let node = self.root[c1 as usize].child & !HAS_CHILDREN;
-                if node != 0 {
-                    let i = self.index(key(node, c2));
+                let child = self.root[c1 as usize].child;
+                if child & filter_bits(c2).1 != 0 {
+                    let i = self.index(key(child & ID_MASK, c2));
                     std::hint::black_box(self.slots[i].key);
                 }
             }
 
             let (_, first) = chars[pos];
-            let Some((mut node, mut word_id)) = self.step(0, first) else {
+            let Some((mut child, mut word_id)) = self.root_step(first) else {
                 continue;
             };
+            let mut key_filter = u64::MAX;
             let mut next = pos + 1;
             loop {
                 let end = chars.get(next).map_or(end_of_text, |&(offset, _)| offset as usize);
                 if word_id != NO_WORD {
                     emit(pos, end, word_id);
                 }
-                if node & HAS_CHILDREN == 0 || next >= n {
+                if next >= n {
                     break;
                 }
                 let (_, ch) = chars[next];
-                let slot = &self.slots[self.probe(key(node & !HAS_CHILDREN, ch))];
+                let (a, b) = filter_bits(ch);
+                if key_filter & a == 0 || child & b == 0 {
+                    break;
+                }
+                let slot = &self.slots[self.probe(key(child & ID_MASK, ch))];
                 if slot.key == 0 {
                     break;
                 }
-                node = slot.child;
+                key_filter = slot.key;
+                child = slot.child;
                 word_id = slot.word_id;
                 next += 1;
             }
@@ -224,8 +260,8 @@ impl CharTrie {
         debug_assert!(word_id >= 0, "word ids are non-negative");
         let mut chars = word.chars().peekable();
         let mut parent = 0u32;
-        // Where the pointer to `parent` is stored, so it can be flagged once
-        // `parent` gains its first child.
+        // Where the pointer to `parent` is stored, so its child filters can
+        // be updated when `parent` gains a child.
         let mut parent_ref = ParentRef::Root;
         while let Some(ch) = chars.next() {
             let last = chars.peek().is_none();
@@ -237,15 +273,19 @@ impl CharTrie {
                 if last {
                     return Some(std::mem::replace(&mut self.root[i].word_id, word_id)).filter(|&old| old != NO_WORD);
                 }
-                parent = self.root[i].child & !HAS_CHILDREN;
+                parent = self.root[i].child & ID_MASK;
                 parent_ref = ParentRef::RootEntry(i);
                 continue;
             }
 
+            let (a, b) = filter_bits(ch);
             match parent_ref {
                 ParentRef::Root => {}
-                ParentRef::RootEntry(i) => self.root[i].child |= HAS_CHILDREN,
-                ParentRef::Slot(i) => self.slots[i].child |= HAS_CHILDREN,
+                ParentRef::RootEntry(i) => self.root[i].child |= b,
+                ParentRef::Slot(i) => {
+                    self.slots[i].key |= a;
+                    self.slots[i].child |= b;
+                }
             }
             let key = key(parent, ch);
             let mut i = self.probe(key);
@@ -263,7 +303,7 @@ impl CharTrie {
             if last {
                 return Some(std::mem::replace(&mut self.slots[i].word_id, word_id)).filter(|&old| old != NO_WORD);
             }
-            parent = self.slots[i].child & !HAS_CHILDREN;
+            parent = self.slots[i].child & ID_MASK;
             parent_ref = ParentRef::Slot(i);
         }
         None
@@ -272,7 +312,7 @@ impl CharTrie {
     #[inline]
     fn alloc_node(&mut self) -> u32 {
         let id = self.next_node;
-        assert!(id < HAS_CHILDREN, "too many dictionary entries");
+        assert!(id < MAX_NODES, "dictionary has too many distinct prefixes");
         self.next_node += 1;
         id
     }
@@ -292,7 +332,7 @@ impl CharTrie {
         let old = std::mem::replace(&mut self.slots, vec![Slot::default(); slots]);
         self.shift = 64 - slots.trailing_zeros();
         for slot in old.into_iter().filter(|s| s.key != 0) {
-            let i = self.probe(slot.key);
+            let i = self.probe(slot.key & KEY_MASK);
             self.slots[i] = slot;
         }
     }
@@ -327,7 +367,7 @@ mod tests {
         let mut out = Vec::new();
         let mut scratch = WalkScratch::default();
         trie.for_each_prefix_at_every_char(text, &mut scratch, |pos, end, id| out.push((pos, end, id)));
-        // Level by level, each level in text order.
+        // Position by position, shortest word first.
         assert_eq!(
             out,
             vec![
@@ -394,6 +434,26 @@ mod tests {
         assert_eq!(trie.insert("中", 3), None);
         assert_eq!(trie.insert("中", 4), Some(3));
         assert_eq!(prefixes(&trie, "中国人"), vec![(4, "中"), (2, "中国")]);
+    }
+
+    /// Many children of one node fill its filters; every child must still be
+    /// found and non-children rejected.
+    #[test]
+    fn test_wide_fanout() {
+        let mut trie = CharTrie::with_slots(2);
+        let children: Vec<String> = (0x4E00..0x4E00 + 300)
+            .map(|c| format!("大{}", char::from_u32(c).unwrap()))
+            .collect();
+        for (i, w) in children.iter().enumerate() {
+            trie.insert(w, i as i32);
+        }
+        for (i, w) in children.iter().enumerate() {
+            assert_eq!(trie.get(w), Some(i as i32));
+        }
+        assert_eq!(trie.get("大x"), None);
+        assert_eq!(trie.get("大"), None);
+        assert_eq!(prefixes(&trie, "大a"), vec![]);
+        assert_eq!(prefixes(&trie, "大一"), vec![(0, "大一")]);
     }
 
     #[test]
