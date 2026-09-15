@@ -1107,13 +1107,7 @@ impl Jieba {
         {
             // Only use posseg HMM for words containing CJK characters
             if word.chars().any(is_cjk) {
-                let results = posseg::cut_with_pos(word);
-                if results.len() == 1 {
-                    return results[0].1;
-                }
-                if let Some((_w, tag)) = results.iter().max_by_key(|(w, _)| w.len()) {
-                    return tag;
-                }
+                return posseg::guess_tag(word);
             }
         }
 
