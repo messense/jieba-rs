@@ -40,11 +40,7 @@ struct CharStates {
 impl CharStates {
     fn new(mut states: Vec<(u16, f64)>) -> Self {
         states.sort_unstable_by_key(|&(s, _)| s);
-        let mut bounds = [0u16; NUM_POS + 1];
-        for pos in 0..NUM_POS {
-            let end = states.partition_point(|&(s, _)| state_pos(s as usize) <= pos);
-            bounds[pos + 1] = end as u16;
-        }
+        let bounds = pos_bounds(&states);
         CharStates {
             states: states.into_boxed_slice(),
             bounds,
@@ -60,7 +56,9 @@ impl CharStates {
 pub(crate) struct PossegData {
     tags: Vec<Box<str>>,
     start_prob: [f64; NUM_STATES],
-    /// Dense 256×256 transition matrix. trans_prob[from][to] = log-prob.
+    /// Dense 256×256 transition matrix, transposed: `trans_prob[to][from]`
+    /// is the log-prob, so the Viterbi step, which scans predecessors of one
+    /// state, walks a single row.
     trans_prob: Box<[[f64; NUM_STATES]; NUM_STATES]>,
     /// Per character: the states it can take, each paired with its emission
     /// log-prob, so the Viterbi pass does a single hash lookup per character.
@@ -133,7 +131,7 @@ fn parse_posseg_data(data: &str) -> PossegData {
                     let to_pos: usize = parts.next().unwrap().parse().unwrap();
                     let to_tag: usize = parts.next().unwrap().parse().unwrap();
                     let prob: f64 = parts.next().unwrap().parse().unwrap();
-                    trans_prob[from][state_idx(to_pos, to_tag)] = prob;
+                    trans_prob[state_idx(to_pos, to_tag)][from] = prob;
                 }
             }
             "emit" => {
@@ -241,6 +239,18 @@ struct Scratch {
     /// Backpointers, `c_len × NUM_STATES`.
     prev: Vec<u16>,
     path: Vec<u16>,
+    /// States reachable at the previous step, with their scores.
+    live: Vec<(u16, f64)>,
+    next_live: Vec<(u16, f64)>,
+}
+
+/// Position-group boundaries of a state list sorted ascending by state.
+fn pos_bounds(states: &[(u16, f64)]) -> [u16; NUM_POS + 1] {
+    let mut bounds = [0u16; NUM_POS + 1];
+    for pos in 0..NUM_POS {
+        bounds[pos + 1] = states.partition_point(|&(s, _)| state_pos(s as usize) <= pos) as u16;
+    }
+    bounds
 }
 
 thread_local! {
@@ -278,56 +288,43 @@ fn viterbi_posseg<'a>(data: &'a PossegData, scratch: &mut Scratch, mut emit: imp
         return;
     }
 
-    // Rolling score buffers: only need prev and current rows
-    let mut scores = [[MIN_FLOAT; NUM_STATES]; 2];
     // Backpointer table: still need full c_len × NUM_STATES for traceback
     let prev = &mut scratch.prev;
     prev.clear();
     prev.resize(c_len * NUM_STATES, u16::MAX);
 
+    // Only reachable states are carried from one step to the next, ascending
+    // by state so that `bounds` delimits their position groups. A state that
+    // scores `MIN_FLOAT` can never be chosen later, so dropping it is exact.
+    let live = &mut scratch.live;
+    let next_live = &mut scratch.next_live;
+    live.clear();
+
     // Initialize t=0
     let first_ch = chars[0].1;
-    let mut prev_states = data.char_states(first_ch);
-    for &(s, em) in prev_states.states.iter() {
-        let si = s as usize;
-        scores[0][si] = data.start_prob[si] + em;
+    for &(s, em) in data.char_states(first_ch).states.iter() {
+        let prob = data.start_prob[s as usize] + em;
+        if prob > MIN_FLOAT {
+            live.push((s, prob));
+        }
     }
+    let mut bounds = pos_bounds(live);
 
     // Recurse
     for t in 1..c_len {
         let ch = chars[t].1;
         let cur_states = data.char_states(ch);
-
-        let (prev_scores, cur_scores) = {
-            let (a, b) = scores.split_at_mut(1);
-            if t % 2 == 1 {
-                (&a[0], &mut b[0])
-            } else {
-                (&b[0], &mut a[0])
-            }
-        };
-        // Only candidate entries are ever written; reset the ones this buffer
-        // received two steps ago instead of clearing all NUM_STATES slots.
-        if t >= 3 {
-            for &(s, _) in data.char_states(chars[t - 2].1).states.iter() {
-                cur_scores[s as usize] = MIN_FLOAT;
-            }
-        }
+        next_live.clear();
 
         for &(s, em) in cur_states.states.iter() {
             let si = s as usize;
+            let trans_from = &data.trans_prob[si];
             let mut best_prob = MIN_FLOAT;
             let mut best_prev = u16::MAX;
 
             for &pp in &PREV_POS[state_pos(si)] {
-                for &(ps, _) in prev_states.with_pos(pp) {
-                    let psi = ps as usize;
-                    let pv = prev_scores[psi];
-                    if pv <= MIN_FLOAT {
-                        continue;
-                    }
-                    // O(1) dense matrix lookup
-                    let tp = data.trans_prob[psi][si];
+                for &(ps, pv) in &live[bounds[pp] as usize..bounds[pp + 1] as usize] {
+                    let tp = trans_from[ps as usize];
                     if tp <= MIN_FLOAT {
                         continue;
                     }
@@ -339,22 +336,24 @@ fn viterbi_posseg<'a>(data: &'a PossegData, scratch: &mut Scratch, mut emit: imp
                 }
             }
 
-            cur_scores[si] = best_prob;
             prev[t * NUM_STATES + si] = best_prev;
+            if best_prob > MIN_FLOAT {
+                next_live.push((s, best_prob));
+            }
         }
 
-        prev_states = cur_states;
+        std::mem::swap(live, next_live);
+        bounds = pos_bounds(live);
     }
 
     // Terminate: find best E or S state at the last timestep
     let last_t = c_len - 1;
-    let last_scores = &scores[last_t % 2];
     let mut best_prob = MIN_FLOAT;
     let mut best_state = u16::MAX;
     for pos in [2, 3] {
-        for &(s, _) in prev_states.with_pos(pos) {
-            if last_scores[s as usize] > best_prob {
-                best_prob = last_scores[s as usize];
+        for &(s, score) in &live[bounds[pos] as usize..bounds[pos + 1] as usize] {
+            if score > best_prob {
+                best_prob = score;
                 best_state = s;
             }
         }

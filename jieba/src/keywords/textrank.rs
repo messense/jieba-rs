@@ -151,9 +151,8 @@ impl KeywordExtract for TextRank {
 
         let mut word2id: HashMap<&str, usize> =
             HashMap::with_capacity_and_hasher(tags.len() / 2, rustc_hash::FxBuildHasher);
-        let mut word2tag: HashMap<&str, &str> =
-            HashMap::with_capacity_and_hasher(tags.len() / 2, rustc_hash::FxBuildHasher);
-        let mut unique_words = Vec::with_capacity(tags.len() / 2);
+        // Each candidate word with the tag of its first occurrence, by id.
+        let mut unique_words: Vec<(&str, &str)> = Vec::with_capacity(tags.len() / 2);
         for t in &tags {
             if !allowed_pos_set.is_empty() && !allowed_pos_set.contains(t.tag) {
                 continue;
@@ -162,11 +161,11 @@ impl KeywordExtract for TextRank {
                 continue;
             }
 
-            word2tag.entry(t.word).or_insert(t.tag);
-            if !word2id.contains_key(t.word) {
-                unique_words.push(t.word);
-                word2id.insert(t.word, unique_words.len() - 1);
-            }
+            let next_id = unique_words.len();
+            word2id.entry(t.word).or_insert_with(|| {
+                unique_words.push((t.word, t.tag));
+                next_id
+            });
         }
 
         let candidate_ids: Vec<Option<usize>> = tags
@@ -213,10 +212,11 @@ impl KeywordExtract for TextRank {
         let mut res = Vec::with_capacity(top_k);
         for _ in 0..top_k {
             if let Some(w) = heap.pop() {
+                let (word, tag) = unique_words[w.word_id];
                 res.push(Keyword {
-                    keyword: unique_words[w.word_id].to_string(),
+                    keyword: word.to_string(),
                     weight: w.rank.into_inner(),
-                    tag: String::from(*word2tag.get(unique_words[w.word_id]).unwrap_or(&"")),
+                    tag: String::from(tag),
                 });
             }
         }

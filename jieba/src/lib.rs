@@ -136,12 +136,11 @@ thread_local! {
     static SCRATCH: std::cell::RefCell<Scratch> = std::cell::RefCell::new(Scratch::default());
 }
 
-/// Check if a character is in a CJK Unified Ideographs range.
+/// The CJK Unified Ideographs ranges other than the main block.
 #[inline]
-fn is_cjk(c: char) -> bool {
+fn is_cjk_extension(c: char) -> bool {
     matches!(c,
         '\u{3400}'..='\u{4DBF}'
-        | '\u{4E00}'..='\u{9FFF}'
         | '\u{F900}'..='\u{FAFF}'
         | '\u{20000}'..='\u{2A6DF}'
         | '\u{2A700}'..='\u{2B73F}'
@@ -152,10 +151,26 @@ fn is_cjk(c: char) -> bool {
     )
 }
 
+/// Check if a character is in a CJK Unified Ideographs range.
+///
+/// The main block is tested on its own first: nearly every character of
+/// ordinary text falls in it, and a single range check is much cheaper than
+/// the vectorised nine-range test the compiler otherwise emits.
+#[inline]
+fn is_cjk(c: char) -> bool {
+    matches!(c, '\u{4E00}'..='\u{9FFF}') || is_cjk_extension(c)
+}
+
 /// RE_HAN_DEFAULT character class: CJK + ASCII alphanumeric + `+#&._%\-`
 #[inline]
 fn is_han_default(c: char) -> bool {
-    is_cjk(c) || c.is_ascii_alphanumeric() || matches!(c, '+' | '#' | '&' | '.' | '_' | '%' | '-')
+    if matches!(c, '\u{4E00}'..='\u{9FFF}') {
+        true
+    } else if c.is_ascii() {
+        c.is_ascii_alphanumeric() || matches!(c, '+' | '#' | '&' | '.' | '_' | '%' | '-')
+    } else {
+        is_cjk_extension(c)
+    }
 }
 
 /// RE_HAN_CUT_ALL character class: CJK only
