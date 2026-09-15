@@ -28,7 +28,6 @@ rustc-hash = { workspace = true }
 include-flate = { workspace = true, optional = true }
 ordered-float = { workspace = true, optional = true }
 phf = { workspace = true }
-regex = { workspace = true }
 
 [dev-dependencies]
 codspeed-criterion-compat = { workspace = true }

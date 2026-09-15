@@ -1,16 +1,10 @@
 use std::cmp::Ordering;
 use std::io::BufRead;
 
-use regex::Regex;
-
 use crate::FxHashMap;
 use crate::SplitByCharacterClass;
 use crate::errors::Error;
 use jieba_macros::generate_hmm_data;
-
-thread_local! {
-    static RE_SKIP: Regex = Regex::new(r"([a-zA-Z0-9]+(?:\.\d+)?%?)").unwrap();
-}
 
 /// HMM-specific CJK range `[\u{4E00}-\u{9FD5}]`
 #[inline]
@@ -18,54 +12,90 @@ fn is_hmm_han(c: char) -> bool {
     matches!(c, '\u{4E00}'..='\u{9FD5}')
 }
 
-/// Regex-based splitter for RE_SKIP in HMM.
-struct HmmSkipSplitter<'r, 't> {
-    finder: regex::Matches<'r, 't>,
-    text: &'t str,
-    last: usize,
-    matched: Option<regex::Match<'t>>,
+/// Length of the match starting at `start`, which must be an ASCII
+/// alphanumeric byte.
+///
+/// This is upstream jieba's `re_skip`, `([a-zA-Z0-9]+(?:\.\d+)?%?)`, spelled
+/// out: an alphanumeric run, then at most one dot-and-digits group, then an
+/// optional percent sign. Every character it can match is ASCII, so the input
+/// can be walked as bytes — a UTF-8 continuation byte is never alphanumeric,
+/// and every boundary returned falls on a character boundary.
+#[inline]
+fn skip_match_len(bytes: &[u8], start: usize) -> usize {
+    debug_assert!(bytes[start].is_ascii_alphanumeric());
+    let mut end = start;
+    while end < bytes.len() && bytes[end].is_ascii_alphanumeric() {
+        end += 1;
+    }
+    // `(?:\.\d+)?` — the group is optional and not repeated, so a second dot
+    // ends the match instead of extending it: `1.2.3` matches only `1.2`.
+    if end < bytes.len() && bytes[end] == b'.' {
+        let mut digits = end + 1;
+        while digits < bytes.len() && bytes[digits].is_ascii_digit() {
+            digits += 1;
+        }
+        if digits > end + 1 {
+            end = digits;
+        }
+    }
+    if end < bytes.len() && bytes[end] == b'%' {
+        end += 1;
+    }
+    end - start
 }
 
-impl<'r, 't> HmmSkipSplitter<'r, 't> {
-    fn new(re: &'r Regex, text: &'t str) -> Self {
+/// Splits a non-CJK block into the same alternating sequence of unmatched gaps
+/// and matched runs that `Regex::find_iter` produced for `re_skip`, so the HMM
+/// keeps seeing identical blocks.
+struct HmmSkipSplitter<'t> {
+    text: &'t str,
+    pos: usize,
+    pending: Option<&'t str>,
+}
+
+impl<'t> HmmSkipSplitter<'t> {
+    #[inline]
+    fn new(text: &'t str) -> Self {
         HmmSkipSplitter {
-            finder: re.find_iter(text),
             text,
-            last: 0,
-            matched: None,
+            pos: 0,
+            pending: None,
         }
     }
 }
 
-impl<'t> Iterator for HmmSkipSplitter<'_, 't> {
+impl<'t> Iterator for HmmSkipSplitter<'t> {
     type Item = &'t str;
 
     fn next(&mut self) -> Option<&'t str> {
-        if let Some(m) = self.matched.take() {
-            return Some(m.as_str());
+        // A gap and the match that ended it are found together; the match is
+        // held back so the gap is yielded first, as the regex version did.
+        if let Some(matched) = self.pending.take() {
+            return Some(matched);
         }
-        match self.finder.next() {
-            None => {
-                if self.last >= self.text.len() {
-                    None
-                } else {
-                    let s = &self.text[self.last..];
-                    self.last = self.text.len();
-                    Some(s)
-                }
-            }
-            Some(m) => {
-                if self.last == m.start() {
-                    self.last = m.end();
-                    Some(m.as_str())
-                } else {
-                    let unmatched = &self.text[self.last..m.start()];
-                    self.last = m.end();
-                    self.matched = Some(m);
-                    Some(unmatched)
-                }
-            }
+        if self.pos >= self.text.len() {
+            return None;
         }
+        let bytes = self.text.as_bytes();
+        let gap_start = self.pos;
+        // A match can only start on an ASCII alphanumeric byte, so skip to the
+        // next one in a tight loop rather than trying to match at every offset.
+        let mut cursor = self.pos;
+        while cursor < bytes.len() && !bytes[cursor].is_ascii_alphanumeric() {
+            cursor += 1;
+        }
+        if cursor == bytes.len() {
+            self.pos = bytes.len();
+            return Some(&self.text[gap_start..]);
+        }
+        let len = skip_match_len(bytes, cursor);
+        let matched = &self.text[cursor..cursor + len];
+        self.pos = cursor + len;
+        if cursor == gap_start {
+            return Some(matched);
+        }
+        self.pending = Some(matched);
+        Some(&self.text[gap_start..cursor])
     }
 }
 
@@ -267,30 +297,27 @@ pub(crate) fn cut_with_allocated_memory<'a>(
     params: &impl HmmParams,
     hmm_context: &mut HmmContext,
 ) {
-    RE_SKIP.with(|re_skip| {
-        let splitter = SplitByCharacterClass::new(sentence, is_hmm_han);
-        for state in splitter {
-            let block = state.as_str();
-            if block.is_empty() {
-                continue;
-            }
-            if state.is_matched() {
-                if block.chars().nth(1).is_some() {
-                    cut_internal(block, words, params, hmm_context);
-                } else {
-                    words.push(block);
-                }
+    let splitter = SplitByCharacterClass::new(sentence, is_hmm_han);
+    for state in splitter {
+        let block = state.as_str();
+        if block.is_empty() {
+            continue;
+        }
+        if state.is_matched() {
+            if block.chars().nth(1).is_some() {
+                cut_internal(block, words, params, hmm_context);
             } else {
-                let skip_splitter = HmmSkipSplitter::new(re_skip, block);
-                for x in skip_splitter {
-                    if x.is_empty() {
-                        continue;
-                    }
-                    words.push(x);
+                words.push(block);
+            }
+        } else {
+            for x in HmmSkipSplitter::new(block) {
+                if x.is_empty() {
+                    continue;
                 }
+                words.push(x);
             }
         }
-    })
+    }
 }
 
 /// A runtime-loadable HMM model for custom segmentation.
