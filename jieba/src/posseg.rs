@@ -231,7 +231,7 @@ fn parse_posseg_data(data: &str) -> PossegData {
 }
 
 #[cfg(feature = "default-dict")]
-include_flate::flate!(static POSSEG_DATA: str from "src/data/posseg.txt");
+include_flate::flate!(static POSSEG_DATA: str from "src/data/posseg.txt" with zstd);
 
 #[cfg(feature = "default-dict")]
 static POSSEG: OnceLock<PossegData> = OnceLock::new();

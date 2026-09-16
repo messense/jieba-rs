@@ -9,7 +9,7 @@ use super::{Keyword, KeywordExtract, KeywordExtractConfig, KeywordExtractConfigB
 use crate::FxHashMap as HashMap;
 use crate::Jieba;
 
-flate!(static DEFAULT_IDF: str from "src/data/idf.txt");
+flate!(static DEFAULT_IDF: str from "src/data/idf.txt" with zstd);
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 struct HeapNode<'a> {

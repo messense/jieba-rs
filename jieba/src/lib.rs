@@ -100,7 +100,7 @@ mod sparse_dag;
 mod trie;
 
 #[cfg(feature = "default-dict")]
-include_flate::flate!(static DEFAULT_DICT: str from "src/data/dict.txt");
+include_flate::flate!(static DEFAULT_DICT: str from "src/data/dict.txt" with zstd);
 
 use sparse_dag::{NO_MATCH, StaticSparseDAG};
 use trie::CharTrie;
