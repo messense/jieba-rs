@@ -1,5 +1,5 @@
 use std::cmp::Ordering;
-use std::collections::{BTreeSet, BinaryHeap};
+use std::collections::BinaryHeap;
 
 use ordered_float::OrderedFloat;
 
@@ -159,39 +159,27 @@ impl KeywordExtract for TextRank {
     /// ```
     fn extract_keywords(&self, jieba: &Jieba, sentence: &str, top_k: usize, allowed_pos: Vec<String>) -> Vec<Keyword> {
         let tags = jieba.tag(sentence, self.config.use_hmm());
-        let mut allowed_pos_set = BTreeSet::new();
-
-        for s in allowed_pos {
-            allowed_pos_set.insert(s);
-        }
+        // A handful of tags at most, so a scan beats building a set.
+        let allowed = |tag: &str| allowed_pos.is_empty() || allowed_pos.iter().any(|p| p == tag);
 
         let mut word2id: HashMap<&str, usize> =
             HashMap::with_capacity_and_hasher(tags.len() / 2, rustc_hash::FxBuildHasher);
         // Each candidate word with the tag of its first occurrence, by id.
         let mut unique_words: Vec<(&str, &str)> = Vec::with_capacity(tags.len() / 2);
-        for t in &tags {
-            if !allowed_pos_set.is_empty() && !allowed_pos_set.contains(t.tag) {
-                continue;
-            }
-            if !self.config.is_keyword(t.word) {
-                continue;
-            }
-
-            let next_id = unique_words.len();
-            word2id.entry(t.word).or_insert_with(|| {
-                unique_words.push((t.word, t.tag));
-                next_id
-            });
-        }
-
+        // Per token, the id of its word if the token is a candidate. Tokens
+        // that are not keep their position, so the window is over the
+        // original token positions.
         let candidate_ids: Vec<Option<usize>> = tags
             .iter()
             .map(|t| {
-                if !allowed_pos_set.is_empty() && !allowed_pos_set.contains(t.tag) {
+                if !allowed(t.tag) || !self.config.is_keyword(t.word) {
                     return None;
                 }
-
-                word2id.get(t.word).copied()
+                let next_id = unique_words.len();
+                Some(*word2id.entry(t.word).or_insert_with(|| {
+                    unique_words.push((t.word, t.tag));
+                    next_id
+                }))
             })
             .collect();
 
@@ -206,31 +194,37 @@ impl KeywordExtract for TextRank {
             }
         }
 
+        if top_k == 0 {
+            return Vec::new();
+        }
+
         let edges: Vec<(usize, usize, Weight)> = cooccurence.iter().map(|(&(u, v), &c)| (u, v, c as f64)).collect();
         let ranking_vector = StateDiagram::new(unique_words.len(), &edges).rank();
 
-        let mut heap = BinaryHeap::new();
+        // The `top_k` best so far, the worst of them at the root.
+        let mut heap = BinaryHeap::with_capacity(top_k.min(ranking_vector.len()));
         for (k, v) in ranking_vector.iter().enumerate() {
-            heap.push(HeapNode {
+            let node = HeapNode {
                 rank: OrderedFloat(v * 1e10),
                 word_id: k,
-            });
-
-            if k >= top_k {
-                heap.pop();
+            };
+            if heap.len() < top_k {
+                heap.push(node);
+            } else if let Some(mut worst) = heap.peek_mut()
+                && node < *worst
+            {
+                *worst = node;
             }
         }
 
-        let mut res = Vec::with_capacity(top_k);
-        for _ in 0..top_k {
-            if let Some(w) = heap.pop() {
-                let (word, tag) = unique_words[w.word_id];
-                res.push(Keyword {
-                    keyword: word.to_string(),
-                    weight: w.rank.into_inner(),
-                    tag: String::from(tag),
-                });
-            }
+        let mut res = Vec::with_capacity(heap.len());
+        while let Some(w) = heap.pop() {
+            let (word, tag) = unique_words[w.word_id];
+            res.push(Keyword {
+                keyword: word.to_string(),
+                weight: w.rank.into_inner(),
+                tag: String::from(tag),
+            });
         }
 
         res.reverse();

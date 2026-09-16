@@ -1,5 +1,5 @@
 use std::cmp::Ordering;
-use std::collections::{BTreeSet, BinaryHeap};
+use std::collections::BinaryHeap;
 use std::io::{self, BufRead};
 
 use include_flate::flate;
@@ -227,16 +227,13 @@ impl KeywordExtract for TfIdf {
     /// ```
     fn extract_keywords(&self, jieba: &Jieba, sentence: &str, top_k: usize, allowed_pos: Vec<String>) -> Vec<Keyword> {
         let tags = jieba.tag(sentence, self.config.use_hmm());
-        let mut allowed_pos_set = BTreeSet::new();
-
-        for s in allowed_pos {
-            allowed_pos_set.insert(s);
-        }
+        // A handful of tags at most, so a scan beats building a set.
+        let allowed = |tag: &str| allowed_pos.is_empty() || allowed_pos.iter().any(|p| p == tag);
 
         // Per word: its frequency and the tag of its first occurrence.
         let mut term_freq: HashMap<&str, (u64, &str)> = HashMap::default();
         for t in &tags {
-            if !allowed_pos_set.is_empty() && !allowed_pos_set.contains(t.tag) {
+            if !allowed(t.tag) {
                 continue;
             }
 
@@ -247,29 +244,35 @@ impl KeywordExtract for TfIdf {
             term_freq.entry(t.word).or_insert((0, t.tag)).0 += 1;
         }
 
+        if top_k == 0 {
+            return Vec::new();
+        }
+
         let total: u64 = term_freq.values().map(|(tf, _)| tf).sum();
-        let mut heap = BinaryHeap::new();
-        for (cnt, (k, (tf, _))) in term_freq.iter().enumerate() {
+        // The `top_k` best so far, the worst of them at the root.
+        let mut heap = BinaryHeap::with_capacity(top_k.min(term_freq.len()));
+        for (k, (tf, _)) in term_freq.iter() {
             let idf = self.idf_dict.get(*k).unwrap_or(&self.median_idf);
             let node = HeapNode {
                 tfidf: OrderedFloat(*tf as f64 * idf / total as f64),
                 word: k,
             };
-            heap.push(node);
-            if cnt >= top_k {
-                heap.pop();
+            if heap.len() < top_k {
+                heap.push(node);
+            } else if let Some(mut worst) = heap.peek_mut()
+                && node < *worst
+            {
+                *worst = node;
             }
         }
 
-        let mut res = Vec::with_capacity(top_k);
-        for _ in 0..top_k {
-            if let Some(w) = heap.pop() {
-                res.push(Keyword {
-                    keyword: String::from(w.word),
-                    weight: w.tfidf.into_inner(),
-                    tag: String::from(term_freq.get(w.word).map_or("", |(_, tag)| tag)),
-                });
-            }
+        let mut res = Vec::with_capacity(heap.len());
+        while let Some(w) = heap.pop() {
+            res.push(Keyword {
+                keyword: String::from(w.word),
+                weight: w.tfidf.into_inner(),
+                tag: String::from(term_freq.get(w.word).map_or("", |(_, tag)| tag)),
+            });
         }
 
         res.reverse();
