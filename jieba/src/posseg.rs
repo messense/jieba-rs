@@ -52,14 +52,16 @@ pub(crate) struct PossegData {
     trans_prob: Box<[[f64; NUM_STATES]; NUM_STATES]>,
     /// Per character: the states it can take, each paired with its emission
     /// log-prob, so the Viterbi pass does a single lookup per character.
-    /// The rows of all characters sit back to back in `states`.
+    /// The rows of all characters sit back to back in `states`, with the
+    /// emission of each in `emits` at the same index.
     ///
     /// A character with an explicit state list keeps exactly that list (an
     /// emission missing for one of its states is `MIN_FLOAT`). A character
     /// with emissions but no state list may take any state in the original
     /// model; a state without an emission scores `MIN_FLOAT` and so can never
     /// be chosen, so listing only the states that have an emission is exact.
-    states: Vec<(u16, f64)>,
+    states: Vec<u16>,
+    emits: Vec<f64>,
     /// Row of each BMP character, an index into `rows`; 0 is the empty row,
     /// for characters the model has never seen.
     char_index: Vec<u16>,
@@ -77,7 +79,8 @@ impl PossegData {
             start: self.states.len() as u32,
             bounds: pos_bounds(&states),
         });
-        self.states.extend(states);
+        self.states.extend(states.iter().map(|&(s, _)| s));
+        self.emits.extend(states.iter().map(|&(_, em)| em));
         if (ch as usize) < CHAR_INDEX_LEN {
             self.char_index[ch as usize] = row;
         } else {
@@ -202,6 +205,7 @@ fn parse_posseg_data(data: &str) -> PossegData {
         start_prob,
         trans_prob,
         states: Vec::new(),
+        emits: Vec::new(),
         char_index: vec![0; CHAR_INDEX_LEN],
         extra_index: FxHashMap::default(),
         rows: vec![CharStates {
@@ -249,18 +253,26 @@ impl PossegData {
         self.rows[row as usize]
     }
 
-    /// All states of a row.
+    /// All states of a row, each with its emission log-prob.
     #[inline]
-    fn all(&self, row: CharStates) -> &[(u16, f64)] {
+    fn all(&self, row: CharStates) -> impl Iterator<Item = (u16, f64)> + '_ {
         let start = row.start as usize;
-        &self.states[start..start + row.bounds[NUM_POS] as usize]
+        let end = start + row.bounds[NUM_POS] as usize;
+        self.states[start..end]
+            .iter()
+            .copied()
+            .zip(self.emits[start..end].iter().copied())
     }
 
-    /// The states of a row with position `pos`.
+    /// The states of a row with position `pos`, each with its emission log-prob.
     #[inline]
-    fn with_pos(&self, row: CharStates, pos: usize) -> &[(u16, f64)] {
-        let start = row.start as usize;
-        &self.states[start + row.bounds[pos] as usize..start + row.bounds[pos + 1] as usize]
+    fn with_pos(&self, row: CharStates, pos: usize) -> impl Iterator<Item = (u16, f64)> + '_ {
+        let start = row.start as usize + row.bounds[pos] as usize;
+        let end = row.start as usize + row.bounds[pos + 1] as usize;
+        self.states[start..end]
+            .iter()
+            .copied()
+            .zip(self.emits[start..end].iter().copied())
     }
 
     fn tag_str(&self, tag_idx: usize) -> &str {
@@ -320,7 +332,7 @@ fn viterbi_posseg<'a>(data: &'a PossegData, scratch: &mut Scratch, mut emit: imp
     if c_len == 1 {
         let ch = chars[0].1;
         let mut best: Option<(f64, u16)> = None;
-        for &(s, em) in data.with_pos(data.char_states(ch), 3) {
+        for (s, em) in data.with_pos(data.char_states(ch), 3) {
             let prob = data.start_prob[s as usize] + em;
             if prob > MIN_FLOAT && best.is_none_or(|(bp, _)| prob >= bp) {
                 best = Some((prob, s));
@@ -343,7 +355,7 @@ fn viterbi_posseg<'a>(data: &'a PossegData, scratch: &mut Scratch, mut emit: imp
 
     // Initialize t=0
     let first_ch = chars[0].1;
-    for &(s, em) in data.all(data.char_states(first_ch)) {
+    for (s, em) in data.all(data.char_states(first_ch)) {
         let prob = data.start_prob[s as usize] + em;
         if prob > MIN_FLOAT {
             live.push((s, prob));
@@ -372,7 +384,7 @@ fn viterbi_posseg<'a>(data: &'a PossegData, scratch: &mut Scratch, mut emit: imp
         let cur_states = data.char_states(ch);
         next_live.clear();
 
-        for &(s, em) in data.all(cur_states) {
+        for (s, em) in data.all(cur_states) {
             let si = s as usize;
             let trans_from = &data.trans_prob[si];
             let mut best_prob = MIN_FLOAT;
