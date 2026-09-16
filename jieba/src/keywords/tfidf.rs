@@ -215,8 +215,8 @@ impl KeywordExtract for TfIdf {
             allowed_pos_set.insert(s);
         }
 
-        let mut term_freq: HashMap<&str, u64> = HashMap::default();
-        let mut word2tag: HashMap<&str, &str> = HashMap::default();
+        // Per word: its frequency and the tag of its first occurrence.
+        let mut term_freq: HashMap<&str, (u64, &str)> = HashMap::default();
         for t in &tags {
             if !allowed_pos_set.is_empty() && !allowed_pos_set.contains(t.tag) {
                 continue;
@@ -226,13 +226,12 @@ impl KeywordExtract for TfIdf {
                 continue;
             }
 
-            word2tag.entry(t.word).or_insert(t.tag);
-            *term_freq.entry(t.word).or_insert(0) += 1;
+            term_freq.entry(t.word).or_insert((0, t.tag)).0 += 1;
         }
 
-        let total: u64 = term_freq.values().sum();
+        let total: u64 = term_freq.values().map(|(tf, _)| tf).sum();
         let mut heap = BinaryHeap::new();
-        for (cnt, (k, tf)) in term_freq.iter().enumerate() {
+        for (cnt, (k, (tf, _))) in term_freq.iter().enumerate() {
             let idf = self.idf_dict.get(*k).unwrap_or(&self.median_idf);
             let node = HeapNode {
                 tfidf: OrderedFloat(*tf as f64 * idf / total as f64),
@@ -250,7 +249,7 @@ impl KeywordExtract for TfIdf {
                 res.push(Keyword {
                     keyword: String::from(w.word),
                     weight: w.tfidf.into_inner(),
-                    tag: String::from(*word2tag.get(w.word).unwrap_or(&"")),
+                    tag: String::from(term_freq.get(w.word).map_or("", |(_, tag)| tag)),
                 });
             }
         }

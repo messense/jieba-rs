@@ -1,13 +1,18 @@
+/// Word candidates of one block, as edges from a character to the index of
+/// the character after a dictionary word starting there, carrying the id of
+/// that word.
+///
+/// Edges arrive through `push_edge` grouped by character in increasing
+/// order, each character's list terminated by a 0 sentinel, and `finish`
+/// closes the lists of the remaining characters. Lists are then read back
+/// by character index.
+#[derive(Default)]
 pub(crate) struct StaticSparseDAG {
+    /// Edge lists, one per character, each terminated by a 0 sentinel.
     array: Vec<u64>,
-    /// Maps byte offset → index into `array`. Uses `usize::MAX` as sentinel for "no entry".
+    /// Maps character index → index into `array`.
     start_pos: Vec<usize>,
-    touched_start_pos: Vec<usize>,
-    size_hint_for_iterator: usize,
-    curr_insertion_len: usize,
 }
-
-const NO_ENTRY: usize = usize::MAX;
 
 /// Maximum byte_end value that can be encoded in the upper 32 bits of a u64.
 const MAX_ENCODED_BYTE_END: usize = u32::MAX as usize - 1;
@@ -32,107 +37,85 @@ fn decode_edge(val: u64) -> (usize, i32) {
     (byte_end, word_id)
 }
 
-pub struct EdgeIter<'a> {
-    dag: &'a StaticSparseDAG,
-    cursor: usize,
-    done: bool,
-}
-
-impl Iterator for EdgeIter<'_> {
-    type Item = (usize, i32);
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.done {
-            return None;
-        }
-        let val = self.dag.array[self.cursor];
-        if val == 0 {
-            self.done = true;
-            None
-        } else {
-            self.cursor += 1;
-            Some(decode_edge(val))
-        }
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        (0, Some(self.dag.size_hint_for_iterator))
-    }
-}
-
-impl std::iter::FusedIterator for EdgeIter<'_> {}
-
 /// word_id sentinel meaning "no dictionary match"
 pub(crate) const NO_MATCH: i32 = i32::MIN;
 
 impl StaticSparseDAG {
-    pub(crate) fn with_size_hint(hint: usize) -> Self {
-        const MAX_CAPACITY: usize = 4_000_000;
-        const MULTIPLIER: usize = 4;
-        const MIN_CAPACITY: usize = 32;
+    pub(crate) fn release_if_huge(&mut self) {
+        // Edge lists are the largest scratch by far when the dictionary has
+        // many long words, and regrowing them costs more than keeping them,
+        // so they get several times the usual budget.
+        const MAX_RETAINED_BYTES: usize = 8 * crate::SCRATCH_BUDGET;
+        crate::release_if_huge(&mut self.array, MAX_RETAINED_BYTES);
+        crate::release_if_huge(&mut self.start_pos, MAX_RETAINED_BYTES);
+    }
 
-        let capacity = (hint * MULTIPLIER).clamp(MIN_CAPACITY, MAX_CAPACITY);
-        let start_pos_len = hint.min(MAX_CAPACITY) + 1;
+    /// The id of the dictionary word spanning characters `start..end`, if
+    /// there is one. Edges are ordered by end, so the scan stops at the
+    /// first one reaching `end`.
+    #[inline]
+    pub(crate) fn word_at(&self, start: usize, end: usize) -> Option<i32> {
+        self.iter_edges(start)
+            .find(|&(e, _)| e >= end)
+            .filter(|&(e, _)| e == end)
+            .map(|(_, word_id)| word_id)
+    }
 
-        StaticSparseDAG {
-            array: Vec::with_capacity(capacity),
-            start_pos: vec![NO_ENTRY; start_pos_len],
-            touched_start_pos: Vec::with_capacity(MIN_CAPACITY),
-            size_hint_for_iterator: 0,
-            curr_insertion_len: 0,
+    /// Record a word spanning characters `char_idx..end`.
+    /// Edges must arrive grouped by character, in increasing character
+    /// order, and in the order they are to be iterated in.
+    #[inline]
+    pub(crate) fn push_edge(&mut self, char_idx: usize, end: usize, word_id: i32) {
+        self.open_through(char_idx);
+        self.array.push(encode_edge(end, word_id));
+    }
+
+    /// Close the current list and open empty ones up to `char_idx`.
+    #[inline]
+    fn open_through(&mut self, char_idx: usize) {
+        debug_assert!(
+            self.start_pos.len() <= char_idx + 1,
+            "edges must arrive in character order"
+        );
+        while self.start_pos.len() <= char_idx {
+            if !self.start_pos.is_empty() {
+                self.array.push(0);
+            }
+            self.start_pos.push(self.array.len());
         }
     }
 
-    #[inline]
-    pub(crate) fn start(&mut self, from: usize) {
-        let idx = self.array.len();
-        self.curr_insertion_len = 0;
-        if from >= self.start_pos.len() {
-            self.start_pos.resize(from + 1, NO_ENTRY);
+    /// Terminate the lists once all edges of the `chars` characters are in.
+    pub(crate) fn finish(&mut self, chars: usize) {
+        if chars == 0 {
+            return;
         }
-        if self.start_pos[from] == NO_ENTRY {
-            self.touched_start_pos.push(from);
-        }
-        self.start_pos[from] = idx;
-    }
-
-    #[inline]
-    pub(crate) fn insert(&mut self, to: usize, word_id: i32) {
-        self.curr_insertion_len += 1;
-        self.array.push(encode_edge(to, word_id));
-    }
-
-    #[inline]
-    pub(crate) fn commit(&mut self) {
-        self.size_hint_for_iterator = std::cmp::max(self.curr_insertion_len, self.size_hint_for_iterator);
+        self.open_through(chars - 1);
         self.array.push(0);
     }
 
-    #[inline]
-    pub(crate) fn iter_edges(&self, from: usize) -> EdgeIter<'_> {
-        assert!(
-            from < self.start_pos.len(),
-            "iter_edges: byte offset {from} out of bounds (len {})",
-            self.start_pos.len()
-        );
-        let cursor = self.start_pos[from];
-        assert!(
-            cursor != NO_ENTRY,
-            "iter_edges: byte offset {from} was never recorded via start()"
-        );
+    /// Number of characters whose edge lists have been built.
+    #[cfg(test)]
+    pub(crate) fn len(&self) -> usize {
+        self.start_pos.len()
+    }
 
-        EdgeIter {
-            dag: self,
-            cursor,
-            done: false,
-        }
+    /// Edges of the `char_idx`-th character.
+    #[inline]
+    pub(crate) fn iter_edges(&self, char_idx: usize) -> impl Iterator<Item = (usize, i32)> + '_ {
+        // Lists are laid out back to back, each followed by its sentinel,
+        // so a list runs from its start to just before the next one's.
+        let start = self.start_pos[char_idx];
+        let end = self
+            .start_pos
+            .get(char_idx + 1)
+            .map_or(self.array.len() - 1, |&next| next - 1);
+        self.array[start..end].iter().map(|&val| decode_edge(val))
     }
 
     pub(crate) fn clear(&mut self) {
         self.array.clear();
-        for from in self.touched_start_pos.drain(..) {
-            self.start_pos[from] = NO_ENTRY;
-        }
+        self.start_pos.clear();
     }
 }
 
@@ -142,45 +125,43 @@ mod tests {
 
     #[test]
     fn test_static_sparse_dag() {
-        let mut dag = StaticSparseDAG::with_size_hint(5);
+        let mut dag = StaticSparseDAG::default();
         let mut ans: Vec<Vec<usize>> = vec![Vec::new(); 5];
         for (i, item) in ans.iter_mut().enumerate().take(4) {
-            dag.start(i);
             for j in (i + 1)..=4 {
                 item.push(j);
-                dag.insert(j, j as i32);
+                dag.push_edge(i, j, j as i32);
             }
-
-            dag.commit()
         }
+        dag.finish(5);
+        assert_eq!(dag.len(), 5);
 
-        assert_eq!(dag.size_hint_for_iterator, 4);
-
-        for (i, item) in ans.iter().enumerate().take(4) {
+        for (i, item) in ans.iter().enumerate() {
             let edges: Vec<usize> = dag.iter_edges(i).map(|(to, _)| to).collect();
-            assert_eq!(item, &edges);
+            assert_eq!(item, &edges, "character {i}");
         }
     }
 
     #[test]
-    fn test_clear_resets_touched_offsets() {
-        let mut dag = StaticSparseDAG::with_size_hint(2);
+    fn test_clear_and_rebuild() {
+        let mut dag = StaticSparseDAG::default();
 
-        dag.start(0);
-        dag.insert(1, 1);
-        dag.commit();
-        dag.start(3);
-        dag.insert(4, 2);
-        dag.commit();
-
-        assert_ne!(dag.start_pos[0], NO_ENTRY);
-        assert_ne!(dag.start_pos[3], NO_ENTRY);
+        dag.push_edge(0, 1, 1);
+        dag.push_edge(2, 4, 2);
+        dag.finish(4);
+        assert_eq!(dag.len(), 4);
+        assert_eq!(dag.iter_edges(1).count(), 0);
+        assert_eq!(dag.iter_edges(2).collect::<Vec<_>>(), vec![(4, 2)]);
+        assert_eq!(dag.iter_edges(3).count(), 0);
 
         dag.clear();
 
         assert!(dag.array.is_empty());
-        assert!(dag.touched_start_pos.is_empty());
-        assert_eq!(dag.start_pos[0], NO_ENTRY);
-        assert_eq!(dag.start_pos[3], NO_ENTRY);
+        assert_eq!(dag.len(), 0);
+
+        dag.push_edge(0, 2, 3);
+        dag.finish(1);
+        let edges: Vec<(usize, i32)> = dag.iter_edges(0).collect();
+        assert_eq!(edges, vec![(2, 3)]);
     }
 }

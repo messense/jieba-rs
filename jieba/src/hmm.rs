@@ -1,4 +1,3 @@
-use std::cmp::Ordering;
 use std::io::BufRead;
 
 use crate::FxHashMap;
@@ -6,10 +5,11 @@ use crate::SplitByCharacterClass;
 use crate::errors::Error;
 use jieba_macros::generate_hmm_data;
 
-/// HMM-specific CJK range `[\u{4E00}-\u{9FD5}]`
+/// HMM-specific CJK range `[\u{4E00}-\u{9FD5}]`, the range the generated
+/// emission table covers.
 #[inline]
 fn is_hmm_han(c: char) -> bool {
-    matches!(c, '\u{4E00}'..='\u{9FD5}')
+    matches!(c, HMM_HAN_MIN..=HMM_HAN_MAX)
 }
 
 /// Characters that join two alphanumeric runs into one token.
@@ -142,15 +142,20 @@ pub enum State {
 // Mapping representing the allow transitiongs into the given state.
 //
 // WARNING: Ordering must match the indicies in State.
+//
+// Within each row the states are in ascending index order. `viterbi` lets
+// the second candidate win an equal score, so this order is what makes a tie
+// go to the state with the larger index, as the original comparison of
+// `(score, State)` pairs did.
 static ALLOWED_PREV_STATUS: [[State; 2]; NUM_STATES] = [
     // Can preceed State::Begin
     [State::End, State::Single],
     // Can preceed State::End
     [State::Begin, State::Middle],
     // Can preceed State::Middle
-    [State::Middle, State::Begin],
+    [State::Begin, State::Middle],
     // Can preceed State::Single
-    [State::Single, State::End],
+    [State::End, State::Single],
 ];
 
 generate_hmm_data!();
@@ -179,7 +184,12 @@ impl HmmParams for BuiltinHmm {
 
     #[inline]
     fn emit_probs(&self, ch: char) -> [f64; NUM_STATES] {
-        EMIT_PROBS.get(&ch).copied().unwrap_or([MIN_FLOAT; NUM_STATES])
+        // Two dependent loads from static tables; no hashing.
+        let offset = (ch as u32).wrapping_sub(EMIT_MIN_CHAR) as usize;
+        match EMIT_INDEX.get(offset) {
+            Some(&row) if row != EMIT_NONE => EMIT_PROBS[row as usize],
+            _ => [MIN_FLOAT; NUM_STATES],
+        }
     }
 }
 
@@ -191,11 +201,18 @@ pub(crate) struct HmmContext {
     chars: Vec<(usize, char)>,
 }
 
-#[allow(non_snake_case, clippy::needless_range_loop)]
+impl HmmContext {
+    pub(crate) fn release_if_huge(&mut self) {
+        crate::release_if_huge(&mut self.v, crate::SCRATCH_BUDGET);
+        crate::release_if_huge(&mut self.prev, crate::SCRATCH_BUDGET);
+        crate::release_if_huge(&mut self.best_path, crate::SCRATCH_BUDGET);
+        crate::release_if_huge(&mut self.chars, crate::SCRATCH_BUDGET);
+    }
+}
+
+#[allow(non_snake_case)]
 fn viterbi(sentence: &str, params: &impl HmmParams, hmm_context: &mut HmmContext) {
-    let states = [State::Begin, State::Middle, State::End, State::Single];
-    #[allow(non_snake_case)]
-    let R = states.len();
+    const R: usize = NUM_STATES;
 
     // Collect char byte offsets into reusable scratch space, derive C from the length.
     hmm_context.chars.clear();
@@ -217,47 +234,43 @@ fn viterbi(sentence: &str, params: &impl HmmParams, hmm_context: &mut HmmContext
         hmm_context.best_path.resize(C, State::Begin);
     }
 
-    let first_char = chars[0].1;
-    let emit_probs = params.emit_probs(first_char);
-    for y in &states {
-        let prob = params.initial_prob(*y as usize) + emit_probs[*y as usize];
-        hmm_context.v[*y as usize] = prob;
+    let v = &mut hmm_context.v;
+    let prev = &mut hmm_context.prev;
+
+    let emit_probs = params.emit_probs(chars[0].1);
+    for y in 0..R {
+        v[y] = params.initial_prob(y) + emit_probs[y];
     }
 
     for t in 1..C {
-        let ch = chars[t].1;
-        let emit_probs = params.emit_probs(ch);
-        for y in &states {
-            let em_prob = emit_probs[*y as usize];
-            let (prob, state) = ALLOWED_PREV_STATUS[*y as usize]
-                .iter()
-                .map(|y0| {
-                    (
-                        hmm_context.v[(t - 1) * R + (*y0 as usize)]
-                            + params.trans_prob(*y0 as usize, *y as usize)
-                            + em_prob,
-                        *y0,
-                    )
-                })
-                .max_by(|x, y| x.partial_cmp(y).unwrap_or(Ordering::Equal))
-                .unwrap();
-            let idx = (t * R) + (*y as usize);
-            hmm_context.v[idx] = prob;
-            hmm_context.prev[idx] = Some(state);
+        let emit_probs = params.emit_probs(chars[t].1);
+        let (prev_v, curr_v) = v.split_at_mut(t * R);
+        let prev_v = &prev_v[(t - 1) * R..];
+        for y in 0..R {
+            let em_prob = emit_probs[y];
+            let [y0, y1] = ALLOWED_PREV_STATUS[y];
+            let prob0 = prev_v[y0 as usize] + params.trans_prob(y0 as usize, y) + em_prob;
+            let prob1 = prev_v[y1 as usize] + params.trans_prob(y1 as usize, y) + em_prob;
+            // On a tie the second candidate wins; `ALLOWED_PREV_STATUS` lists
+            // it as the state with the larger index.
+            let (prob, state) = if prob0 > prob1 { (prob0, y0) } else { (prob1, y1) };
+            curr_v[y] = prob;
+            prev[t * R + y] = Some(state);
         }
     }
 
-    let (_prob, state) = [State::End, State::Single]
-        .iter()
-        .map(|y| (hmm_context.v[(C - 1) * R + (*y as usize)], y))
-        .max_by(|x, y| x.partial_cmp(y).unwrap_or(Ordering::Equal))
-        .unwrap();
+    let last_v = &v[(C - 1) * R..C * R];
+    let state = if last_v[State::End as usize] > last_v[State::Single as usize] {
+        State::End
+    } else {
+        State::Single
+    };
 
     let mut t = C - 1;
-    let mut curr = *state;
+    let mut curr = state;
 
-    hmm_context.best_path[t] = *state;
-    while let Some(p) = hmm_context.prev[t * R + (curr as usize)] {
+    hmm_context.best_path[t] = state;
+    while let Some(p) = prev[t * R + (curr as usize)] {
         assert!(t > 0);
         hmm_context.best_path[t - 1] = p;
         curr = p;
@@ -269,7 +282,7 @@ fn viterbi(sentence: &str, params: &impl HmmParams, hmm_context: &mut HmmContext
 #[allow(non_snake_case)]
 fn cut_internal<'a>(
     sentence: &'a str,
-    words: &mut Vec<&'a str>,
+    words: &mut impl FnMut(&'a str),
     params: &impl HmmParams,
     hmm_context: &mut HmmContext,
 ) {
@@ -285,13 +298,13 @@ fn cut_internal<'a>(
             State::End => {
                 let byte_start = begin;
                 let byte_end = hmm_context.chars.get(i + 1).map_or(str_len, |&(offset, _)| offset);
-                words.push(&sentence[byte_start..byte_end]);
+                words(&sentence[byte_start..byte_end]);
                 next_byte_offset = byte_end;
             }
             State::Single => {
                 let byte_start = curr_byte_offset;
                 let byte_end = hmm_context.chars.get(i + 1).map_or(str_len, |&(offset, _)| offset);
-                words.push(&sentence[byte_start..byte_end]);
+                words(&sentence[byte_start..byte_end]);
                 next_byte_offset = byte_end;
             }
             State::Middle => { /* do nothing */ }
@@ -300,14 +313,14 @@ fn cut_internal<'a>(
 
     if next_byte_offset < str_len {
         let byte_start = next_byte_offset;
-        words.push(&sentence[byte_start..]);
+        words(&sentence[byte_start..]);
     }
 }
 
 #[allow(non_snake_case)]
 pub(crate) fn cut_with_allocated_memory<'a>(
     sentence: &'a str,
-    words: &mut Vec<&'a str>,
+    words: &mut impl FnMut(&'a str),
     params: &impl HmmParams,
     hmm_context: &mut HmmContext,
 ) {
@@ -321,14 +334,14 @@ pub(crate) fn cut_with_allocated_memory<'a>(
             if block.chars().nth(1).is_some() {
                 cut_internal(block, words, params, hmm_context);
             } else {
-                words.push(block);
+                words(block);
             }
         } else {
             for x in HmmSkipSplitter::new(block) {
                 if x.is_empty() {
                     continue;
                 }
-                words.push(x);
+                words(x);
             }
         }
     }
@@ -460,7 +473,7 @@ mod tests {
     fn cut<'a>(sentence: &'a str, words: &mut Vec<&'a str>) {
         let mut hmm_context = HmmContext::default();
 
-        cut_with_allocated_memory(sentence, words, &BuiltinHmm, &mut hmm_context)
+        cut_with_allocated_memory(sentence, &mut |word| words.push(word), &BuiltinHmm, &mut hmm_context)
     }
     #[test]
     #[allow(non_snake_case)]
@@ -473,6 +486,20 @@ mod tests {
             r#"[Begin, End, Begin, End, Begin, Middle, End, Begin, End, Begin, Middle, End, Begin, End, Single]"#
         ]]
         .assert_eq(&format!("{:?}", hmm_context.best_path));
+    }
+
+    /// Characters without emission data score every state the same, so the
+    /// path is decided by tie-breaking alone: an equal score goes to the
+    /// state with the larger index (`Single` over `End`, `Middle` over
+    /// `Begin`), which keeps such runs as single characters.
+    #[test]
+    fn test_hmm_cut_ties_go_to_the_higher_state() {
+        let mut words = Vec::new();
+        cut("龘龘龘", &mut words);
+        expect![[r#"["龘", "龘", "龘"]"#]].assert_eq(&format!("{:?}", words));
+        words.clear();
+        cut("龘龘龘龘龘", &mut words);
+        expect![[r#"["龘", "龘", "龘", "龘", "龘"]"#]].assert_eq(&format!("{:?}", words));
     }
 
     #[test]

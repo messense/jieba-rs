@@ -1,4 +1,4 @@
-use std::cmp::Ordering;
+use std::cell::RefCell;
 use std::sync::OnceLock;
 
 use crate::FxHashMap;
@@ -7,6 +7,11 @@ const MIN_FLOAT: f64 = -3.14e100;
 const NUM_POS: usize = 4; // B=0, M=1, E=2, S=3
 const NUM_TAGS: usize = 64;
 const NUM_STATES: usize = NUM_POS * NUM_TAGS;
+
+/// Positions that may precede each position: B after {E, S}, M and E after
+/// {B, M}, S after {E, S}. The transition table only ever contains these pairs,
+/// so restricting the search to them is exact and halves the inner loop.
+const PREV_POS: [[usize; 2]; NUM_POS] = [[2, 3], [0, 1], [0, 1], [2, 3]];
 
 #[inline]
 fn state_idx(pos: usize, tag: usize) -> usize {
@@ -23,26 +28,59 @@ fn state_tag(idx: usize) -> usize {
     idx % NUM_TAGS
 }
 
+/// Candidate states of one character, with the emission log-prob of each.
+///
+/// States are sorted ascending, so they are grouped by position;
+/// `bounds[p]..bounds[p + 1]` is the range of states with position `p`.
+struct CharStates {
+    states: Box<[(u16, f64)]>,
+    bounds: [u16; NUM_POS + 1],
+}
+
+impl CharStates {
+    fn new(mut states: Vec<(u16, f64)>) -> Self {
+        states.sort_unstable_by_key(|&(s, _)| s);
+        let bounds = pos_bounds(&states);
+        CharStates {
+            states: states.into_boxed_slice(),
+            bounds,
+        }
+    }
+
+    #[inline]
+    fn with_pos(&self, pos: usize) -> &[(u16, f64)] {
+        &self.states[self.bounds[pos] as usize..self.bounds[pos + 1] as usize]
+    }
+}
+
 pub(crate) struct PossegData {
     tags: Vec<Box<str>>,
     start_prob: [f64; NUM_STATES],
-    /// Dense 256×256 transition matrix. trans_prob[from][to] = log-prob.
+    /// Dense 256×256 transition matrix, transposed: `trans_prob[to][from]`
+    /// is the log-prob, so the Viterbi step, which scans predecessors of one
+    /// state, walks a single row.
     trans_prob: Box<[[f64; NUM_STATES]; NUM_STATES]>,
-    emit_prob: Vec<FxHashMap<char, f64>>,
-    char_state_tab: FxHashMap<char, Vec<u16>>,
+    /// Per character: the states it can take, each paired with its emission
+    /// log-prob, so the Viterbi pass does a single hash lookup per character.
+    ///
+    /// A character with an explicit state list keeps exactly that list (an
+    /// emission missing for one of its states is `MIN_FLOAT`). A character
+    /// with emissions but no state list may take any state in the original
+    /// model; a state without an emission scores `MIN_FLOAT` and so can never
+    /// be chosen, so listing only the states that have an emission is exact.
+    char_states: FxHashMap<char, CharStates>,
+    /// Returned for characters the model has never seen: no state can be taken.
+    no_states: CharStates,
 }
 
 fn parse_posseg_data(data: &str) -> PossegData {
     let mut tags: Vec<Box<str>> = Vec::new();
     let mut start_prob = [MIN_FLOAT; NUM_STATES];
-    // Initialize dense matrix to MIN_FLOAT
-    let trans_prob = vec![[MIN_FLOAT; NUM_STATES]; NUM_STATES].into_boxed_slice();
-    let trans_prob: Box<[[f64; NUM_STATES]; NUM_STATES]> = unsafe {
-        let ptr = Box::into_raw(trans_prob) as *mut [[f64; NUM_STATES]; NUM_STATES];
-        Box::from_raw(ptr)
-    };
-    let mut trans_prob = trans_prob;
-    let mut emit_prob: Vec<FxHashMap<char, f64>> = vec![FxHashMap::default(); NUM_STATES];
+    let mut trans_prob: Box<[[f64; NUM_STATES]; NUM_STATES]> = vec![[MIN_FLOAT; NUM_STATES]; NUM_STATES]
+        .into_boxed_slice()
+        .try_into()
+        .unwrap();
+    let mut emit_prob: FxHashMap<char, Vec<(u16, f64)>> = FxHashMap::default();
     let mut char_state_tab: FxHashMap<char, Vec<u16>> = FxHashMap::default();
 
     let mut section = "";
@@ -93,7 +131,7 @@ fn parse_posseg_data(data: &str) -> PossegData {
                     let to_pos: usize = parts.next().unwrap().parse().unwrap();
                     let to_tag: usize = parts.next().unwrap().parse().unwrap();
                     let prob: f64 = parts.next().unwrap().parse().unwrap();
-                    trans_prob[from][state_idx(to_pos, to_tag)] = prob;
+                    trans_prob[state_idx(to_pos, to_tag)][from] = prob;
                 }
             }
             "emit" => {
@@ -102,7 +140,7 @@ fn parse_posseg_data(data: &str) -> PossegData {
                 let mut state_iter = state_part.splitn(2, ',');
                 let pos: usize = state_iter.next().unwrap().parse().unwrap();
                 let tag: usize = state_iter.next().unwrap().parse().unwrap();
-                let si = state_idx(pos, tag);
+                let si = state_idx(pos, tag) as u16;
 
                 for seg in segments {
                     let seg = seg.trim();
@@ -113,7 +151,11 @@ fn parse_posseg_data(data: &str) -> PossegData {
                     let prob: f64 = parts.next().unwrap().parse().unwrap();
                     let ch_str = parts.next().unwrap();
                     let ch = ch_str.chars().next().unwrap();
-                    emit_prob[si].insert(ch, prob);
+                    let entries = emit_prob.entry(ch).or_default();
+                    match entries.iter_mut().find(|(s, _)| *s == si) {
+                        Some(entry) => entry.1 = prob,
+                        None => entries.push((si, prob)),
+                    }
                 }
             }
             "char_state" => {
@@ -131,18 +173,40 @@ fn parse_posseg_data(data: &str) -> PossegData {
                     let tag: usize = parts.next().unwrap().parse().unwrap();
                     states.push(state_idx(pos, tag) as u16);
                 }
-                char_state_tab.insert(ch, states);
+                // An empty list means "no restriction", the same as no list at all.
+                if states.is_empty() {
+                    char_state_tab.remove(&ch);
+                } else {
+                    char_state_tab.insert(ch, states);
+                }
             }
             _ => {}
         }
+    }
+
+    let mut char_states: FxHashMap<char, CharStates> =
+        FxHashMap::with_capacity_and_hasher(emit_prob.len().max(char_state_tab.len()), rustc_hash::FxBuildHasher);
+    for (ch, states) in char_state_tab {
+        let emits = emit_prob.remove(&ch).unwrap_or_default();
+        let states = states
+            .into_iter()
+            .map(|s| {
+                let prob = emits.iter().find(|(es, _)| *es == s).map_or(MIN_FLOAT, |&(_, p)| p);
+                (s, prob)
+            })
+            .collect();
+        char_states.insert(ch, CharStates::new(states));
+    }
+    for (ch, emits) in emit_prob {
+        char_states.insert(ch, CharStates::new(emits));
     }
 
     PossegData {
         tags,
         start_prob,
         trans_prob,
-        emit_prob,
-        char_state_tab,
+        char_states,
+        no_states: CharStates::new(Vec::new()),
     }
 }
 
@@ -157,18 +221,10 @@ pub(crate) fn posseg_data() -> &'static PossegData {
     POSSEG.get_or_init(|| parse_posseg_data(&POSSEG_DATA))
 }
 
-/// All possible state indices (used as fallback when char is not in char_state_tab).
-fn all_states() -> Vec<u16> {
-    (0..NUM_STATES as u16).collect()
-}
-
 impl PossegData {
-    fn get_char_states(&self, ch: char) -> &[u16] {
-        self.char_state_tab.get(&ch).map(|v| v.as_slice()).unwrap_or(&[])
-    }
-
-    fn emit(&self, state: usize, ch: char) -> f64 {
-        self.emit_prob[state].get(&ch).copied().unwrap_or(MIN_FLOAT)
+    #[inline]
+    fn char_states(&self, ch: char) -> &CharStates {
+        self.char_states.get(&ch).unwrap_or(&self.no_states)
     }
 
     fn tag_str(&self, tag_idx: usize) -> &str {
@@ -176,132 +232,178 @@ impl PossegData {
     }
 }
 
-fn viterbi_posseg<'a>(data: &'a PossegData, chars: &[(usize, char)]) -> Vec<(usize, usize, &'a str)> {
+/// Reusable Viterbi buffers, so tagging a short OOV word allocates nothing.
+#[derive(Default)]
+struct Scratch {
+    chars: Vec<(usize, char)>,
+    /// Backpointers, `c_len × NUM_STATES`.
+    prev: Vec<u16>,
+    path: Vec<u16>,
+    /// States reachable at the previous step, with their scores.
+    live: Vec<(u16, f64)>,
+    next_live: Vec<(u16, f64)>,
+}
+
+impl Scratch {
+    fn release_if_huge(&mut self) {
+        crate::release_if_huge(&mut self.chars, crate::SCRATCH_BUDGET);
+        crate::release_if_huge(&mut self.prev, crate::SCRATCH_BUDGET);
+        crate::release_if_huge(&mut self.path, crate::SCRATCH_BUDGET);
+        crate::release_if_huge(&mut self.live, crate::SCRATCH_BUDGET);
+        crate::release_if_huge(&mut self.next_live, crate::SCRATCH_BUDGET);
+    }
+}
+
+/// Position-group boundaries of a state list sorted ascending by state.
+fn pos_bounds(states: &[(u16, f64)]) -> [u16; NUM_POS + 1] {
+    let mut bounds = [0u16; NUM_POS + 1];
+    for pos in 0..NUM_POS {
+        bounds[pos + 1] = states.partition_point(|&(s, _)| state_pos(s as usize) <= pos) as u16;
+    }
+    bounds
+}
+
+thread_local! {
+    static SCRATCH: RefCell<Scratch> = RefCell::new(Scratch::default());
+}
+
+/// A word span decoded from the best state path: byte range and tag.
+type Span<'a> = (usize, usize, &'a str);
+
+/// Runs Viterbi over `chars` and feeds each decoded span to `emit`, in order.
+fn viterbi_posseg<'a>(data: &'a PossegData, scratch: &mut Scratch, mut emit: impl FnMut(Span<'a>)) {
+    let chars = &scratch.chars;
     let c_len = chars.len();
     if c_len == 0 {
-        return Vec::new();
+        return;
     }
 
     let str_end = chars[c_len - 1].0 + chars[c_len - 1].1.len_utf8();
-    let fallback = all_states();
 
     // Single character: just pick the best S state
     if c_len == 1 {
         let ch = chars[0].1;
-        let candidates = data.get_char_states(ch);
-        let candidates = if candidates.is_empty() { &fallback } else { candidates };
-        let best = candidates
-            .iter()
-            .filter(|&&s| state_pos(s as usize) == 3) // S states only
-            .map(|&s| {
-                let prob = data.start_prob[s as usize] + data.emit(s as usize, ch);
-                (prob, s)
-            })
-            .filter(|(p, _)| *p > MIN_FLOAT)
-            .max_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(Ordering::Equal));
+        let mut best: Option<(f64, u16)> = None;
+        for &(s, em) in data.char_states(ch).with_pos(3) {
+            let prob = data.start_prob[s as usize] + em;
+            if prob > MIN_FLOAT && best.is_none_or(|(bp, _)| prob >= bp) {
+                best = Some((prob, s));
+            }
+        }
         let tag = match best {
             Some((_, s)) => data.tag_str(state_tag(s as usize)),
             None => "x",
         };
-        return vec![(chars[0].0, str_end, tag)];
+        emit((chars[0].0, str_end, tag));
+        return;
     }
 
-    // Rolling score buffers: only need prev and current rows
-    let mut prev_scores = [MIN_FLOAT; NUM_STATES];
-    let mut cur_scores = [MIN_FLOAT; NUM_STATES];
-    // Backpointer table: still need full c_len × NUM_STATES for traceback
-    let mut prev = vec![u16::MAX; c_len * NUM_STATES];
+    // Only reachable states are carried from one step to the next, ascending
+    // by state so that `bounds` delimits their position groups. A state that
+    // scores `MIN_FLOAT` can never be chosen later, so dropping it is exact.
+    let live = &mut scratch.live;
+    let next_live = &mut scratch.next_live;
+    live.clear();
 
     // Initialize t=0
     let first_ch = chars[0].1;
-    let first_states = data.get_char_states(first_ch);
-    let first_states = if first_states.is_empty() {
-        &fallback
-    } else {
-        first_states
-    };
-    for &s in first_states {
-        let si = s as usize;
-        prev_scores[si] = data.start_prob[si] + data.emit(si, first_ch);
+    for &(s, em) in data.char_states(first_ch).states.iter() {
+        let prob = data.start_prob[s as usize] + em;
+        if prob > MIN_FLOAT {
+            live.push((s, prob));
+        }
+    }
+    // Once no state is reachable none can become so, and the search below
+    // would end with nothing to trace back; give the whole span the
+    // fallback tag now, before sizing the backpointer table for it.
+    if live.is_empty() {
+        emit((chars[0].0, str_end, "x"));
+        return;
+    }
+    let mut bounds = pos_bounds(live);
+
+    // Backpointer table, `c_len × NUM_STATES`. The traceback only reads the
+    // entries of live states, which this call writes first, so stale
+    // contents from a previous word are never observed.
+    let prev = &mut scratch.prev;
+    if prev.len() < c_len * NUM_STATES {
+        prev.resize(c_len * NUM_STATES, u16::MAX);
     }
 
     // Recurse
     for t in 1..c_len {
         let ch = chars[t].1;
-        let cur_states = data.get_char_states(ch);
-        let cur_states = if cur_states.is_empty() { &fallback } else { cur_states };
+        let cur_states = data.char_states(ch);
+        next_live.clear();
 
-        // Hoist prev_states lookup outside the inner loop
-        let prev_ch = chars[t - 1].1;
-        let prev_states = data.get_char_states(prev_ch);
-        let prev_states = if prev_states.is_empty() { &fallback } else { prev_states };
-
-        cur_scores.fill(MIN_FLOAT);
-
-        for &s in cur_states {
+        for &(s, em) in cur_states.states.iter() {
             let si = s as usize;
-            let em = data.emit(si, ch);
+            let trans_from = &data.trans_prob[si];
             let mut best_prob = MIN_FLOAT;
             let mut best_prev = u16::MAX;
 
-            for &ps in prev_states {
-                let psi = ps as usize;
-                let pv = prev_scores[psi];
-                if pv <= MIN_FLOAT {
-                    continue;
-                }
-                // O(1) dense matrix lookup
-                let tp = data.trans_prob[psi][si];
-                if tp <= MIN_FLOAT {
-                    continue;
-                }
-                let prob = pv + tp + em;
-                if prob > best_prob {
-                    best_prob = prob;
-                    best_prev = ps;
+            for &pp in &PREV_POS[state_pos(si)] {
+                for &(ps, pv) in &live[bounds[pp] as usize..bounds[pp + 1] as usize] {
+                    let tp = trans_from[ps as usize];
+                    if tp <= MIN_FLOAT {
+                        continue;
+                    }
+                    let prob = pv + tp + em;
+                    if prob > best_prob {
+                        best_prob = prob;
+                        best_prev = ps;
+                    }
                 }
             }
 
-            cur_scores[si] = best_prob;
             prev[t * NUM_STATES + si] = best_prev;
+            if best_prob > MIN_FLOAT {
+                next_live.push((s, best_prob));
+            }
         }
 
-        prev_scores = cur_scores;
+        std::mem::swap(live, next_live);
+        if live.is_empty() {
+            emit((chars[0].0, str_end, "x"));
+            return;
+        }
+        bounds = pos_bounds(live);
     }
 
     // Terminate: find best E or S state at the last timestep
     let last_t = c_len - 1;
     let mut best_prob = MIN_FLOAT;
     let mut best_state = u16::MAX;
-    #[allow(clippy::needless_range_loop)]
-    for s in 0..NUM_STATES {
-        let pos = state_pos(s);
-        if (pos == 2 || pos == 3) && prev_scores[s] > best_prob {
-            best_prob = prev_scores[s];
-            best_state = s as u16;
+    for pos in [2, 3] {
+        for &(s, score) in &live[bounds[pos] as usize..bounds[pos + 1] as usize] {
+            if score > best_prob {
+                best_prob = score;
+                best_state = s;
+            }
         }
     }
 
     // Fallback if no valid E/S state was reachable
     if best_state == u16::MAX || best_prob <= MIN_FLOAT {
-        return vec![(chars[0].0, str_end, "x")];
+        emit((chars[0].0, str_end, "x"));
+        return;
     }
 
     // Traceback
-    let mut path = vec![0u16; c_len];
+    let path = &mut scratch.path;
+    path.clear();
+    path.resize(c_len, 0);
     path[last_t] = best_state;
     for t in (1..c_len).rev() {
         let backptr = prev[t * NUM_STATES + path[t] as usize];
-        if backptr == u16::MAX {
-            // Unreachable path — return whole span as fallback
-            return vec![(chars[0].0, str_end, "x")];
-        }
+        // A live state was reached from a live state.
+        debug_assert_ne!(backptr, u16::MAX);
         path[t - 1] = backptr;
     }
 
     // Decode word boundaries
-    let mut result = Vec::new();
     let mut word_start = chars[0].0;
+    let mut last_end = None;
 
     for t in 0..c_len {
         let s = path[t] as usize;
@@ -318,50 +420,66 @@ fn viterbi_posseg<'a>(data: &'a PossegData, chars: &[(usize, char)]) -> Vec<(usi
                 // E: end of word
                 let byte_end = if t + 1 < c_len { chars[t + 1].0 } else { str_end };
                 let tag = data.tag_str(state_tag(s));
-                result.push((word_start, byte_end, tag));
+                emit((word_start, byte_end, tag));
+                last_end = Some(byte_end);
             }
             3 => {
                 // S: single char word
                 let byte_end = if t + 1 < c_len { chars[t + 1].0 } else { str_end };
                 let tag = data.tag_str(state_tag(s));
-                result.push((chars[t].0, byte_end, tag));
+                emit((chars[t].0, byte_end, tag));
+                last_end = Some(byte_end);
             }
             _ => unreachable!(),
         }
     }
 
-    // Fallback if decoding produced no words (e.g. all B/M with no E)
-    if result.is_empty() {
-        return vec![(chars[0].0, str_end, "x")];
+    match last_end {
+        // Fallback if decoding produced no words (e.g. all B/M with no E)
+        None => emit((chars[0].0, str_end, "x")),
+        // Handle incomplete B..M sequence at end
+        Some(byte_end) if byte_end < str_end => emit((byte_end, str_end, "x")),
+        Some(_) => {}
     }
-
-    // Handle incomplete B..M sequence at end
-    if let Some(&(_, byte_end, _)) = result.last()
-        && byte_end < str_end
-    {
-        result.push((byte_end, str_end, "x"));
-    }
-
-    result
 }
 
 /// Segment and POS-tag a Chinese character string using the compound HMM.
 ///
 /// Returns `(word_slice, pos_tag_str)` pairs where `pos_tag_str` has `'static`
 /// lifetime because it references the lazily-initialized static data.
-#[cfg(feature = "default-dict")]
-pub(crate) fn cut_with_pos(sentence: &str) -> Vec<(&str, &'static str)> {
-    let data = posseg_data();
-    let chars: Vec<(usize, char)> = sentence.char_indices().collect();
-    if chars.is_empty() {
-        return Vec::new();
-    }
-
-    let spans = viterbi_posseg(data, &chars);
+#[cfg(all(test, feature = "default-dict"))]
+fn cut_with_pos(sentence: &str) -> Vec<(&str, &'static str)> {
+    let mut spans = Vec::new();
+    for_each_span(sentence, |(start, end, tag)| spans.push((&sentence[start..end], tag)));
     spans
-        .into_iter()
-        .map(|(start, end, tag)| (&sentence[start..end], tag))
-        .collect()
+}
+
+/// Runs the compound HMM over `text` on this thread's scratch and feeds
+/// each decoded span to `emit`, in order.
+#[cfg(feature = "default-dict")]
+fn for_each_span(text: &str, emit: impl FnMut(Span<'static>)) {
+    let data = posseg_data();
+    SCRATCH.with(|scratch| {
+        let mut scratch = scratch.borrow_mut();
+        scratch.chars.clear();
+        scratch.chars.extend(text.char_indices());
+        viterbi_posseg(data, &mut scratch, emit);
+        scratch.release_if_huge();
+    });
+}
+
+/// The tag for an OOV word: the tag of the longest span the compound HMM
+/// finds in it (the last such span on ties), or `"x"` for an empty word.
+#[cfg(feature = "default-dict")]
+pub(crate) fn guess_tag(word: &str) -> &'static str {
+    let mut best: Option<(usize, &'static str)> = None;
+    for_each_span(word, |(start, end, tag)| {
+        let len = end - start;
+        if best.is_none_or(|(best_len, _)| len >= best_len) {
+            best = Some((len, tag));
+        }
+    });
+    best.map_or("x", |(_, tag)| tag)
 }
 
 #[cfg(all(test, feature = "default-dict"))]
@@ -407,5 +525,21 @@ mod tests {
     fn test_posseg_empty() {
         let results = cut_with_pos("");
         assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_guess_tag_matches_longest_span() {
+        for word in [
+            "张尧",
+            "小明硕士毕业于中国科学院计算所",
+            "云计算",
+            "我",
+            "创新办",
+            "龘齉",
+        ] {
+            let spans = cut_with_pos(word);
+            let expected = spans.iter().max_by_key(|(w, _)| w.len()).map_or("x", |(_, t)| t);
+            assert_eq!(guess_tag(word), expected, "{word}");
+        }
     }
 }

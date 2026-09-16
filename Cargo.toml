@@ -3,7 +3,7 @@ resolver = "3"
 members = ["capi", "jieba", "jieba-macros", "examples/weicheng"]
 
 [workspace.package]
-version = "0.10.4"
+version = "0.11.0"
 edition = "2024"
 license = "MIT"
 readme = "README.md"
@@ -11,19 +11,16 @@ repository = "https://github.com/messense/jieba-rs"
 
 [workspace.dependencies]
 # Workspace dependencies
-jieba-rs = { version = "0.10.0", path = "jieba" }
-jieba-macros = { version = "0.10.0", path = "jieba-macros" }
+jieba-rs = { version = "0.11.0", path = "jieba" }
+jieba-macros = { version = "0.11.0", path = "jieba-macros" }
 
 # Crates.io dependencies
 c_fixed_string = { version = "0.2" }
 bytecount = { version = "0.6", features = ["runtime-dispatch-simd"] }
-cedarwood = { version = "0.5" }
 codspeed-criterion-compat = { version = "3.0.5" }
 rustc-hash = { version = "2.1" }
 include-flate = { version = "0.3.1" }
 ordered-float = { version = "5.0" }
-phf = { version = "0.13.1" }
-phf_codegen = { version = "0.13.1" }
 rayon = { version = "1.11" }
 expect-test = { version = "1.5" }
 wasm-bindgen-test = { version = "0.3.50" }
