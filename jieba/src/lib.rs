@@ -1147,7 +1147,15 @@ impl Jieba {
                 }
             };
             let mut push_gram = |i: usize, len: usize| {
-                if dag.iter_edges(x + i).any(|(end, _)| end == x + i + len) {
+                // Edges are ordered by end, so the scan stops at the first
+                // one reaching the wanted end instead of running through
+                // every longer match.
+                let target = x + i + len;
+                let found = dag
+                    .iter_edges(x + i)
+                    .find(|&(end, _)| end >= target)
+                    .is_some_and(|(end, _)| end == target);
+                if found {
                     let gram = &word[rel(i)..rel(i + len)];
                     let byte_start = token.byte_start + rel(i);
                     new_words.push(Token {
