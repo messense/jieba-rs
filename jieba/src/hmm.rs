@@ -195,15 +195,15 @@ impl HmmParams for BuiltinHmm {
 
 #[derive(Default)]
 pub(crate) struct HmmContext {
-    v: Vec<f64>,
-    prev: Vec<Option<State>>,
+    /// Chosen predecessor of each state at each step but the first,
+    /// `NUM_STATES` per character.
+    prev: Vec<State>,
     best_path: Vec<State>,
     chars: Vec<(usize, char)>,
 }
 
 impl HmmContext {
     pub(crate) fn release_if_huge(&mut self) {
-        crate::release_if_huge(&mut self.v, crate::SCRATCH_BUDGET);
         crate::release_if_huge(&mut self.prev, crate::SCRATCH_BUDGET);
         crate::release_if_huge(&mut self.best_path, crate::SCRATCH_BUDGET);
         crate::release_if_huge(&mut self.chars, crate::SCRATCH_BUDGET);
@@ -221,31 +221,29 @@ fn viterbi(sentence: &str, params: &impl HmmParams, hmm_context: &mut HmmContext
     let C = chars.len();
     assert!(C > 1);
 
+    // Every entry the traceback reads is written below first, so stale
+    // contents from a previous run are never observed.
     if hmm_context.prev.len() < R * C {
-        hmm_context.prev.resize(R * C, None);
-    }
-    hmm_context.prev[..R].fill(None);
-
-    if hmm_context.v.len() < R * C {
-        hmm_context.v.resize(R * C, 0.0);
+        hmm_context.prev.resize(R * C, State::Begin);
     }
 
     if hmm_context.best_path.len() < C {
         hmm_context.best_path.resize(C, State::Begin);
     }
 
-    let v = &mut hmm_context.v;
     let prev = &mut hmm_context.prev;
 
+    // The recurrence only reads the previous step's scores, so they roll
+    // through two small arrays; only the predecessor choices are kept.
     let emit_probs = params.emit_probs(chars[0].1);
+    let mut prev_v = [0.0; R];
     for y in 0..R {
-        v[y] = params.initial_prob(y) + emit_probs[y];
+        prev_v[y] = params.initial_prob(y) + emit_probs[y];
     }
 
     for t in 1..C {
         let emit_probs = params.emit_probs(chars[t].1);
-        let (prev_v, curr_v) = v.split_at_mut(t * R);
-        let prev_v = &prev_v[(t - 1) * R..];
+        let mut curr_v = [0.0; R];
         for y in 0..R {
             let em_prob = emit_probs[y];
             let [y0, y1] = ALLOWED_PREV_STATUS[y];
@@ -255,26 +253,21 @@ fn viterbi(sentence: &str, params: &impl HmmParams, hmm_context: &mut HmmContext
             // it as the state with the larger index.
             let (prob, state) = if prob0 > prob1 { (prob0, y0) } else { (prob1, y1) };
             curr_v[y] = prob;
-            prev[t * R + y] = Some(state);
+            prev[t * R + y] = state;
         }
+        prev_v = curr_v;
     }
 
-    let last_v = &v[(C - 1) * R..C * R];
-    let state = if last_v[State::End as usize] > last_v[State::Single as usize] {
+    let mut curr = if prev_v[State::End as usize] > prev_v[State::Single as usize] {
         State::End
     } else {
         State::Single
     };
 
-    let mut t = C - 1;
-    let mut curr = state;
-
-    hmm_context.best_path[t] = state;
-    while let Some(p) = prev[t * R + (curr as usize)] {
-        assert!(t > 0);
-        hmm_context.best_path[t - 1] = p;
-        curr = p;
-        t -= 1;
+    hmm_context.best_path[C - 1] = curr;
+    for t in (1..C).rev() {
+        curr = prev[t * R + (curr as usize)];
+        hmm_context.best_path[t - 1] = curr;
     }
     hmm_context.best_path.truncate(C);
 }
