@@ -3,38 +3,39 @@
 /// that word.
 ///
 /// Edges arrive through `push_edge` grouped by character in increasing
-/// order, each character's list terminated by a 0 sentinel, and `finish`
-/// closes the lists of the remaining characters. Lists are then read back
-/// by character index.
+/// order and `finish` closes the lists of the remaining characters. Lists
+/// are then read back by character index. This is the compressed sparse
+/// row layout: one flat edge array and, per character, the offset where
+/// its list starts, with the next character's offset ending it.
 #[derive(Default)]
 pub(crate) struct StaticSparseDAG {
-    /// Edge lists, one per character, each terminated by a 0 sentinel.
+    /// Edge lists, one per character, back to back.
     array: Vec<u64>,
-    /// Maps character index → index into `array`.
+    /// Maps character index → index into `array`; one more entry than
+    /// characters once finished, so every list has an end.
     start_pos: Vec<usize>,
 }
 
-/// Maximum byte_end value that can be encoded in the upper 32 bits of a u64.
-const MAX_ENCODED_BYTE_END: usize = u32::MAX as usize - 1;
+/// Maximum end index that can be encoded in the upper 32 bits of a u64.
+const MAX_ENCODED_END: usize = u32::MAX as usize;
 
-/// Encodes (byte_end + 1, word_id) into a single u64.
-/// byte_end is stored as byte_end + 1 in the upper 32 bits so that 0 can
-/// serve as the sentinel, which limits `byte_end` to `u32::MAX - 1`.
+/// Encodes (end, word_id) into a single u64: the end index in the upper 32
+/// bits, the word id in the lower 32.
 /// word_id uses i32::MIN as "no match" sentinel.
 #[inline(always)]
-fn encode_edge(byte_end: usize, word_id: i32) -> u64 {
+fn encode_edge(end: usize, word_id: i32) -> u64 {
     debug_assert!(
-        byte_end <= MAX_ENCODED_BYTE_END,
-        "byte_end {byte_end} exceeds encodable range {MAX_ENCODED_BYTE_END}",
+        end <= MAX_ENCODED_END,
+        "end {end} exceeds encodable range {MAX_ENCODED_END}",
     );
-    ((byte_end as u64 + 1) << 32) | (word_id as u32 as u64)
+    ((end as u64) << 32) | (word_id as u32 as u64)
 }
 
 #[inline(always)]
 fn decode_edge(val: u64) -> (usize, i32) {
-    let byte_end = (val >> 32) as usize - 1;
+    let end = (val >> 32) as usize;
     let word_id = val as u32 as i32;
-    (byte_end, word_id)
+    (end, word_id)
 }
 
 /// word_id sentinel meaning "no dictionary match"
@@ -70,7 +71,8 @@ impl StaticSparseDAG {
         self.array.push(encode_edge(end, word_id));
     }
 
-    /// Close the current list and open empty ones up to `char_idx`.
+    /// Open the lists of every character up to and including `char_idx`
+    /// that has none yet; a list opened now that gets no edge stays empty.
     #[inline]
     fn open_through(&mut self, char_idx: usize) {
         debug_assert!(
@@ -78,39 +80,27 @@ impl StaticSparseDAG {
             "edges must arrive in character order"
         );
         while self.start_pos.len() <= char_idx {
-            if !self.start_pos.is_empty() {
-                self.array.push(0);
-            }
             self.start_pos.push(self.array.len());
         }
     }
 
     /// Terminate the lists once all edges of the `chars` characters are in.
     pub(crate) fn finish(&mut self, chars: usize) {
-        if chars == 0 {
-            return;
-        }
-        self.open_through(chars - 1);
-        self.array.push(0);
+        self.open_through(chars);
     }
 
     /// Number of characters whose edge lists have been built.
     #[cfg(test)]
     pub(crate) fn len(&self) -> usize {
-        self.start_pos.len()
+        self.start_pos.len().saturating_sub(1)
     }
 
     /// Edges of the `char_idx`-th character.
     #[inline]
     pub(crate) fn iter_edges(&self, char_idx: usize) -> impl Iterator<Item = (usize, i32)> + '_ {
-        // Lists are laid out back to back, each followed by its sentinel,
-        // so a list runs from its start to just before the next one's.
-        let start = self.start_pos[char_idx];
-        let end = self
-            .start_pos
-            .get(char_idx + 1)
-            .map_or(self.array.len() - 1, |&next| next - 1);
-        self.array[start..end].iter().map(|&val| decode_edge(val))
+        self.array[self.start_pos[char_idx]..self.start_pos[char_idx + 1]]
+            .iter()
+            .map(|&val| decode_edge(val))
     }
 
     pub(crate) fn clear(&mut self) {
