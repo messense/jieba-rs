@@ -305,18 +305,13 @@ pub(crate) enum SplitState<'t> {
     Matched(&'t str),
 }
 
+#[cfg(test)]
 impl<'t> SplitState<'t> {
-    #[inline]
     fn as_str(&self) -> &'t str {
         match self {
             SplitState::Unmatched(t) => t,
             SplitState::Matched(t) => t,
         }
-    }
-
-    #[inline]
-    pub fn is_matched(&self) -> bool {
-        matches!(self, SplitState::Matched(_))
     }
 }
 
@@ -886,8 +881,7 @@ impl Jieba {
             return;
         }
         if dag.word_at(x, y).is_none() {
-            let word = &block[Self::byte_at(block, chars, x)..Self::byte_at(block, chars, y)];
-            self.hmm_cut(word, x, dag, words, hmm_context);
+            self.hmm_cut(block, chars, x, y, dag, words, hmm_context);
         } else {
             // Each character is a route step of its own, so its id is known.
             let mut x = x;
@@ -899,16 +893,20 @@ impl Jieba {
         }
     }
 
-    /// Cut `word`, which starts at character `x` of its block, with the HMM.
+    /// Cut characters `x..y` of `block` with the HMM.
     #[inline]
+    #[allow(clippy::too_many_arguments)]
     fn hmm_cut<'a>(
         &self,
-        word: &'a str,
+        block: &'a str,
+        chars: &[(u32, char)],
         x: usize,
+        y: usize,
         dag: &StaticSparseDAG,
         words: &mut impl FnMut(&'a str, i32, usize, usize, &StaticSparseDAG),
         hmm_context: &mut hmm::HmmContext,
     ) {
+        let run = &chars[x..y];
         let mut x = x;
         let mut words = |word: &'a str| {
             let count = char_count(word);
@@ -916,9 +914,9 @@ impl Jieba {
             x += count;
         };
         if let Some(ref model) = self.hmm_model {
-            hmm::cut_with_allocated_memory(word, &mut words, model, hmm_context);
+            hmm::cut_with_allocated_memory(block, run, &mut words, model, hmm_context);
         } else {
-            hmm::cut_with_allocated_memory(word, &mut words, &hmm::builtin_hmm(), hmm_context);
+            hmm::cut_with_allocated_memory(block, run, &mut words, &hmm::builtin_hmm(), hmm_context);
         }
     }
 

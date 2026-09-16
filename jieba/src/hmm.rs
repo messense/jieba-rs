@@ -1,7 +1,6 @@
 use std::io::BufRead;
 
 use crate::FxHashMap;
-use crate::SplitByCharacterClass;
 use crate::errors::Error;
 use jieba_macros::generate_hmm_data;
 
@@ -199,25 +198,21 @@ pub(crate) struct HmmContext {
     /// `NUM_STATES` per character.
     prev: Vec<State>,
     best_path: Vec<State>,
-    chars: Vec<(usize, char)>,
 }
 
 impl HmmContext {
     pub(crate) fn release_if_huge(&mut self) {
         crate::release_if_huge(&mut self.prev, crate::SCRATCH_BUDGET);
         crate::release_if_huge(&mut self.best_path, crate::SCRATCH_BUDGET);
-        crate::release_if_huge(&mut self.chars, crate::SCRATCH_BUDGET);
     }
 }
 
+/// Label each of `chars`, the already decoded characters of a run, leaving
+/// the best state sequence in `hmm_context.best_path`.
 #[allow(non_snake_case)]
-fn viterbi(sentence: &str, params: &impl HmmParams, hmm_context: &mut HmmContext) {
+fn viterbi(chars: &[(u32, char)], params: &impl HmmParams, hmm_context: &mut HmmContext) {
     const R: usize = NUM_STATES;
 
-    // Collect char byte offsets into reusable scratch space, derive C from the length.
-    hmm_context.chars.clear();
-    hmm_context.chars.extend(sentence.char_indices());
-    let chars = &hmm_context.chars;
     let C = chars.len();
     assert!(C > 1);
 
@@ -272,71 +267,88 @@ fn viterbi(sentence: &str, params: &impl HmmParams, hmm_context: &mut HmmContext
     hmm_context.best_path.truncate(C);
 }
 
+/// Cut the run `chars` of `text`, which ends at byte `run_end`, along the
+/// best state sequence.
 #[allow(non_snake_case)]
 fn cut_internal<'a>(
-    sentence: &'a str,
+    text: &'a str,
+    chars: &[(u32, char)],
+    run_end: usize,
     words: &mut impl FnMut(&'a str),
     params: &impl HmmParams,
     hmm_context: &mut HmmContext,
 ) {
-    let str_len = sentence.len();
-    viterbi(sentence, params, hmm_context);
-    let mut begin = 0;
-    let mut next_byte_offset = 0;
+    viterbi(chars, params, hmm_context);
+    let mut begin = chars[0].0 as usize;
+    let mut next_byte_offset = begin;
 
-    for (i, &(curr_byte_offset, _)) in hmm_context.chars.iter().enumerate() {
+    for (i, &(curr_byte_offset, _)) in chars.iter().enumerate() {
+        let curr_byte_offset = curr_byte_offset as usize;
         let state = hmm_context.best_path[i];
         match state {
             State::Begin => begin = curr_byte_offset,
             State::End => {
                 let byte_start = begin;
-                let byte_end = hmm_context.chars.get(i + 1).map_or(str_len, |&(offset, _)| offset);
-                words(&sentence[byte_start..byte_end]);
+                let byte_end = chars.get(i + 1).map_or(run_end, |&(offset, _)| offset as usize);
+                words(&text[byte_start..byte_end]);
                 next_byte_offset = byte_end;
             }
             State::Single => {
                 let byte_start = curr_byte_offset;
-                let byte_end = hmm_context.chars.get(i + 1).map_or(str_len, |&(offset, _)| offset);
-                words(&sentence[byte_start..byte_end]);
+                let byte_end = chars.get(i + 1).map_or(run_end, |&(offset, _)| offset as usize);
+                words(&text[byte_start..byte_end]);
                 next_byte_offset = byte_end;
             }
             State::Middle => { /* do nothing */ }
         }
     }
 
-    if next_byte_offset < str_len {
+    if next_byte_offset < run_end {
         let byte_start = next_byte_offset;
-        words(&sentence[byte_start..]);
+        words(&text[byte_start..run_end]);
     }
 }
 
+/// Cut the characters `chars` of `text` (byte offsets into `text` and
+/// values, already decoded by the caller) with the HMM: runs of the
+/// characters the model covers go through Viterbi, anything else is split
+/// like `RE_SKIP` did.
 #[allow(non_snake_case)]
 pub(crate) fn cut_with_allocated_memory<'a>(
-    sentence: &'a str,
+    text: &'a str,
+    chars: &[(u32, char)],
     words: &mut impl FnMut(&'a str),
     params: &impl HmmParams,
     hmm_context: &mut HmmContext,
 ) {
-    let splitter = SplitByCharacterClass::new(sentence, is_hmm_han);
-    for state in splitter {
-        let block = state.as_str();
-        if block.is_empty() {
-            continue;
+    let n = chars.len();
+    let mut i = 0;
+    while i < n {
+        let matched = is_hmm_han(chars[i].1);
+        let mut j = i + 1;
+        while j < n && is_hmm_han(chars[j].1) == matched {
+            j += 1;
         }
-        if state.is_matched() {
-            if block.chars().nth(1).is_some() {
-                cut_internal(block, words, params, hmm_context);
+        let start = chars[i].0 as usize;
+        let end = chars.get(j).map_or_else(
+            || chars[j - 1].0 as usize + chars[j - 1].1.len_utf8(),
+            |&(offset, _)| offset as usize,
+        );
+        if matched {
+            if j - i > 1 {
+                cut_internal(text, &chars[i..j], end, words, params, hmm_context);
             } else {
-                words(block);
+                words(&text[start..end]);
             }
         } else {
-            for x in HmmSkipSplitter::new(block) {
+            for x in HmmSkipSplitter::new(&text[start..end]) {
                 if x.is_empty() {
                     continue;
                 }
                 words(x);
             }
         }
+        i = j;
     }
 }
 
@@ -463,10 +475,20 @@ mod tests {
 
     use super::{BuiltinHmm, HmmContext, cut_with_allocated_memory, viterbi};
 
+    fn decode(sentence: &str) -> Vec<(u32, char)> {
+        sentence.char_indices().map(|(i, c)| (i as u32, c)).collect()
+    }
+
     fn cut<'a>(sentence: &'a str, words: &mut Vec<&'a str>) {
         let mut hmm_context = HmmContext::default();
-
-        cut_with_allocated_memory(sentence, &mut |word| words.push(word), &BuiltinHmm, &mut hmm_context)
+        let chars = decode(sentence);
+        cut_with_allocated_memory(
+            sentence,
+            &chars,
+            &mut |word| words.push(word),
+            &BuiltinHmm,
+            &mut hmm_context,
+        )
     }
     #[test]
     #[allow(non_snake_case)]
@@ -474,7 +496,7 @@ mod tests {
         let sentence = "小明硕士毕业于中国科学院计算所";
 
         let mut hmm_context = HmmContext::default();
-        viterbi(sentence, &BuiltinHmm, &mut hmm_context);
+        viterbi(&decode(sentence), &BuiltinHmm, &mut hmm_context);
         expect![[
             r#"[Begin, End, Begin, End, Begin, Middle, End, Begin, End, Begin, Middle, End, Begin, End, Single]"#
         ]]
