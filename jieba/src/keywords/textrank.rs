@@ -158,30 +158,32 @@ impl KeywordExtract for TextRank {
     /// );
     /// ```
     fn extract_keywords(&self, jieba: &Jieba, sentence: &str, top_k: usize, allowed_pos: Vec<String>) -> Vec<Keyword> {
-        let tags = jieba.tag(sentence, self.config.use_hmm());
         // A handful of tags at most, so a scan beats building a set.
         let allowed = |tag: &str| allowed_pos.is_empty() || allowed_pos.iter().any(|p| p == tag);
 
+        // Sized for the roughly one token per four bytes that Chinese text
+        // segments into, about half of them candidates.
+        let tokens_guess = sentence.len() / 4;
         let mut word2id: HashMap<&str, usize> =
-            HashMap::with_capacity_and_hasher(tags.len() / 2, rustc_hash::FxBuildHasher);
+            HashMap::with_capacity_and_hasher(tokens_guess / 2, rustc_hash::FxBuildHasher);
         // Each candidate word with the tag of its first occurrence, by id.
-        let mut unique_words: Vec<(&str, &str)> = Vec::with_capacity(tags.len() / 2);
+        let mut unique_words: Vec<(&str, &str)> = Vec::with_capacity(tokens_guess / 2);
         // Per token, the id of its word if the token is a candidate. Tokens
         // that are not keep their position, so the window is over the
         // original token positions.
-        let candidate_ids: Vec<Option<usize>> = tags
-            .iter()
-            .map(|t| {
-                if !allowed(t.tag) || !self.config.is_keyword(t.word) {
-                    return None;
-                }
+        let mut candidate_ids: Vec<Option<usize>> = Vec::with_capacity(tokens_guess);
+        jieba.tag_each(sentence, self.config.use_hmm(), |t| {
+            let id = if allowed(t.tag) && self.config.is_keyword(t.word) {
                 let next_id = unique_words.len();
                 Some(*word2id.entry(t.word).or_insert_with(|| {
                     unique_words.push((t.word, t.tag));
                     next_id
                 }))
-            })
-            .collect();
+            } else {
+                None
+            };
+            candidate_ids.push(id);
+        });
 
         let mut cooccurence: HashMap<(usize, usize), usize> = HashMap::default();
         for (i, &u) in candidate_ids.iter().enumerate() {

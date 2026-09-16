@@ -1179,6 +1179,15 @@ impl Jieba {
     /// `hmm`: enable HMM or not
     pub fn tag<'a>(&'a self, sentence: &'a str, hmm: bool) -> Vec<Tag<'a>> {
         let mut tags = Vec::with_capacity(output_capacity(sentence));
+        self.tag_each(sentence, hmm, |tag| tags.push(tag));
+        tags
+    }
+
+    /// Tag `sentence` and hand each tagged word to `emit` in order, for
+    /// callers that consume the tags as they come. `emit` runs while the
+    /// segmentation scratch is borrowed, so it must not segment.
+    #[cfg_attr(not(any(feature = "tfidf", feature = "textrank")), allow(dead_code))]
+    pub(crate) fn tag_each<'a>(&'a self, sentence: &'a str, hmm: bool, mut emit: impl FnMut(Tag<'a>)) {
         self.cut_each(sentence, hmm, |token, word_id, block| {
             let word = token.word;
             let word_id = if word_id != NO_MATCH {
@@ -1192,7 +1201,7 @@ impl Jieba {
                 Some(word_id) => &self.tags[self.records[word_id as usize].tag as usize],
                 None => self.guess_tag(word),
             };
-            tags.push(Tag {
+            emit(Tag {
                 word,
                 tag,
                 start: token.start,
@@ -1201,7 +1210,6 @@ impl Jieba {
                 byte_end: token.byte_end,
             });
         });
-        tags
     }
 
     /// Guess the POS tag for an OOV word.

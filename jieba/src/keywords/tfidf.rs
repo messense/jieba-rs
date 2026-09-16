@@ -226,23 +226,17 @@ impl KeywordExtract for TfIdf {
     /// );
     /// ```
     fn extract_keywords(&self, jieba: &Jieba, sentence: &str, top_k: usize, allowed_pos: Vec<String>) -> Vec<Keyword> {
-        let tags = jieba.tag(sentence, self.config.use_hmm());
         // A handful of tags at most, so a scan beats building a set.
         let allowed = |tag: &str| allowed_pos.is_empty() || allowed_pos.iter().any(|p| p == tag);
 
-        // Per word: its frequency and the tag of its first occurrence.
+        // Per word: its frequency and the tag of its first occurrence,
+        // counted as the tags come rather than from a materialised list.
         let mut term_freq: HashMap<&str, (u64, &str)> = HashMap::default();
-        for t in &tags {
-            if !allowed(t.tag) {
-                continue;
+        jieba.tag_each(sentence, self.config.use_hmm(), |t| {
+            if allowed(t.tag) && self.config.is_keyword(t.word) {
+                term_freq.entry(t.word).or_insert((0, t.tag)).0 += 1;
             }
-
-            if !self.config.is_keyword(t.word) {
-                continue;
-            }
-
-            term_freq.entry(t.word).or_insert((0, t.tag)).0 += 1;
-        }
+        });
 
         if top_k == 0 {
             return Vec::new();
