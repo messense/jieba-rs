@@ -100,7 +100,7 @@ mod sparse_dag;
 mod trie;
 
 #[cfg(feature = "default-dict")]
-include_flate::flate!(static DEFAULT_DICT: str from "src/data/dict.txt");
+include_flate::flate!(static DEFAULT_DICT: str from "src/data/dict.txt" with zstd);
 
 use sparse_dag::{NO_MATCH, StaticSparseDAG};
 use trie::CharTrie;
@@ -305,18 +305,13 @@ pub(crate) enum SplitState<'t> {
     Matched(&'t str),
 }
 
+#[cfg(test)]
 impl<'t> SplitState<'t> {
-    #[inline]
     fn as_str(&self) -> &'t str {
         match self {
             SplitState::Unmatched(t) => t,
             SplitState::Matched(t) => t,
         }
-    }
-
-    #[inline]
-    pub fn is_matched(&self) -> bool {
-        matches!(self, SplitState::Matched(_))
     }
 }
 
@@ -764,28 +759,23 @@ impl Jieba {
         base: usize,
         block_unicode_start: usize,
         tokens: &mut Vec<Token<'a>>,
-        dag: &mut StaticSparseDAG,
     ) {
-        self.dag(chars, dag);
-
-        let block_base = block.as_ptr() as usize;
-        let byte_offset_in_sentence = block_base - base;
-
-        for (idx, &(byte_start, _)) in chars.iter().enumerate() {
-            let byte_start = byte_start as usize;
-            for (end, _) in dag.iter_edges(idx) {
-                let word = &block[byte_start..Self::byte_at(block, chars, end)];
-                let bs = byte_offset_in_sentence + byte_start;
-                tokens.push(Token {
-                    word,
-                    start: block_unicode_start + idx,
-                    end: block_unicode_start + end,
-                    byte_start: bs,
-                    byte_end: bs + word.len(),
-                });
-            }
-        }
-        dag.clear();
+        // The trie walk visits the words in output order, so the tokens
+        // come straight from it; nothing else reads this block's matches,
+        // so no DAG is built.
+        let byte_offset_in_sentence = block.as_ptr() as usize - base;
+        self.trie.for_each_prefix_at_every_char(chars, |idx, end, _| {
+            let byte_start = chars[idx].0 as usize;
+            let word = &block[byte_start..Self::byte_at(block, chars, end)];
+            let bs = byte_offset_in_sentence + byte_start;
+            tokens.push(Token {
+                word,
+                start: block_unicode_start + idx,
+                end: block_unicode_start + end,
+                byte_start: bs,
+                byte_end: bs + word.len(),
+            });
+        });
     }
 
     /// Emit the word spanning characters `x..y` of `block` with `word_id`.
@@ -891,8 +881,7 @@ impl Jieba {
             return;
         }
         if dag.word_at(x, y).is_none() {
-            let word = &block[Self::byte_at(block, chars, x)..Self::byte_at(block, chars, y)];
-            self.hmm_cut(word, x, dag, words, hmm_context);
+            self.hmm_cut(block, chars, x, y, dag, words, hmm_context);
         } else {
             // Each character is a route step of its own, so its id is known.
             let mut x = x;
@@ -904,16 +893,20 @@ impl Jieba {
         }
     }
 
-    /// Cut `word`, which starts at character `x` of its block, with the HMM.
+    /// Cut characters `x..y` of `block` with the HMM.
     #[inline]
+    #[allow(clippy::too_many_arguments)]
     fn hmm_cut<'a>(
         &self,
-        word: &'a str,
+        block: &'a str,
+        chars: &[(u32, char)],
         x: usize,
+        y: usize,
         dag: &StaticSparseDAG,
         words: &mut impl FnMut(&'a str, i32, usize, usize, &StaticSparseDAG),
         hmm_context: &mut hmm::HmmContext,
     ) {
+        let run = &chars[x..y];
         let mut x = x;
         let mut words = |word: &'a str| {
             let count = char_count(word);
@@ -921,9 +914,9 @@ impl Jieba {
             x += count;
         };
         if let Some(ref model) = self.hmm_model {
-            hmm::cut_with_allocated_memory(word, &mut words, model, hmm_context);
+            hmm::cut_with_allocated_memory(block, run, &mut words, model, hmm_context);
         } else {
-            hmm::cut_with_allocated_memory(word, &mut words, &hmm::builtin_hmm(), hmm_context);
+            hmm::cut_with_allocated_memory(block, run, &mut words, &hmm::builtin_hmm(), hmm_context);
         }
     }
 
@@ -1041,7 +1034,7 @@ impl Jieba {
 
         SCRATCH.with(|scratch| {
             let mut scratch = scratch.borrow_mut();
-            let Scratch { dag, chars, .. } = &mut *scratch;
+            let Scratch { chars, .. } = &mut *scratch;
             let mut splitter = SplitByCharacterClass::new(sentence, is_han_cut_all);
 
             while let Some(state) = splitter.next_recording(chars) {
@@ -1050,7 +1043,7 @@ impl Jieba {
                         assert!(!block.is_empty());
                         let block_unicode_start = unicode_offset;
                         unicode_offset += chars.len();
-                        self.cut_all_tokens(block, chars, base, block_unicode_start, &mut tokens, dag);
+                        self.cut_all_tokens(block, chars, base, block_unicode_start, &mut tokens);
                     }
                     SplitState::Unmatched(block) => {
                         assert!(!block.is_empty());
@@ -1184,6 +1177,15 @@ impl Jieba {
     /// `hmm`: enable HMM or not
     pub fn tag<'a>(&'a self, sentence: &'a str, hmm: bool) -> Vec<Tag<'a>> {
         let mut tags = Vec::with_capacity(output_capacity(sentence));
+        self.tag_each(sentence, hmm, |tag| tags.push(tag));
+        tags
+    }
+
+    /// Tag `sentence` and hand each tagged word to `emit` in order, for
+    /// callers that consume the tags as they come. `emit` runs while the
+    /// segmentation scratch is borrowed, so it must not segment.
+    #[cfg_attr(not(any(feature = "tfidf", feature = "textrank")), allow(dead_code))]
+    pub(crate) fn tag_each<'a>(&'a self, sentence: &'a str, hmm: bool, mut emit: impl FnMut(Tag<'a>)) {
         self.cut_each(sentence, hmm, |token, word_id, block| {
             let word = token.word;
             let word_id = if word_id != NO_MATCH {
@@ -1197,7 +1199,7 @@ impl Jieba {
                 Some(word_id) => &self.tags[self.records[word_id as usize].tag as usize],
                 None => self.guess_tag(word),
             };
-            tags.push(Tag {
+            emit(Tag {
                 word,
                 tag,
                 start: token.start,
@@ -1206,7 +1208,6 @@ impl Jieba {
                 byte_end: token.byte_end,
             });
         });
-        tags
     }
 
     /// Guess the POS tag for an OOV word.

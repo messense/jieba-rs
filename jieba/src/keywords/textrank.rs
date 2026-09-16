@@ -1,5 +1,5 @@
 use std::cmp::Ordering;
-use std::collections::{BTreeSet, BinaryHeap};
+use std::collections::BinaryHeap;
 
 use ordered_float::OrderedFloat;
 
@@ -9,55 +9,71 @@ use crate::Jieba;
 
 type Weight = f64;
 
-#[derive(Clone)]
-struct Edge {
-    dst: usize,
-    weight: Weight,
-}
-
-impl Edge {
-    fn new(dst: usize, weight: Weight) -> Edge {
-        Edge { dst, weight }
-    }
-}
-
-type Edges = Vec<Edge>;
-type Graph = Vec<Edges>;
-
+/// The co-occurrence graph, in compressed sparse row form: the neighbours
+/// of vertex `v` are `dst[offsets[v]..offsets[v + 1]]`, and each carries the
+/// share of `dst`'s rank it hands to `v`, `edge weight / total weight out of
+/// dst`, which is constant across the ranking sweeps.
 struct StateDiagram {
     damping_factor: Weight,
-    g: Graph,
+    offsets: Vec<usize>,
+    dst: Vec<usize>,
+    share: Vec<Weight>,
 }
 
 impl StateDiagram {
-    fn new(size: usize) -> Self {
+    /// Build the graph of `size` vertices from undirected weighted edges.
+    /// Each vertex's neighbours keep the order the edges were given in.
+    fn new(size: usize, edges: &[(usize, usize, Weight)]) -> Self {
+        // Counting sort by source: each undirected edge is an entry in both
+        // endpoints' lists.
+        let mut offsets = vec![0usize; size + 1];
+        for &(u, v, _) in edges {
+            offsets[u + 1] += 1;
+            offsets[v + 1] += 1;
+        }
+        for i in 0..size {
+            offsets[i + 1] += offsets[i];
+        }
+        let m = offsets[size];
+        let mut dst = vec![0usize; m];
+        let mut weight = vec![0.0; m];
+        let mut next = offsets[..size].to_vec();
+        for &(u, v, w) in edges {
+            dst[next[u]] = v;
+            weight[next[u]] = w;
+            next[u] += 1;
+            dst[next[v]] = u;
+            weight[next[v]] = w;
+            next[v] += 1;
+        }
+
+        let mut outflow = vec![0.0; size];
+        for v in 0..size {
+            outflow[v] = weight[offsets[v]..offsets[v + 1]].iter().sum();
+        }
+        let share = dst.iter().zip(&weight).map(|(&d, &w)| w / outflow[d]).collect();
+
         StateDiagram {
             damping_factor: 0.85,
-            g: vec![Vec::new(); size],
+            offsets,
+            dst,
+            share,
         }
     }
 
-    fn add_undirected_edge(&mut self, src: usize, dst: usize, weight: Weight) {
-        self.g[src].push(Edge::new(dst, weight));
-        self.g[dst].push(Edge::new(src, weight));
-    }
-
-    fn rank(&mut self) -> Vec<Weight> {
-        let n = self.g.len();
+    fn rank(&self) -> Vec<Weight> {
+        let n = self.offsets.len() - 1;
         let default_weight = 1.0 / (n as f64);
 
         let mut ranking_vector = vec![default_weight; n];
 
-        let mut outflow_weights = vec![0.0; n];
-        for (i, v) in self.g.iter().enumerate() {
-            outflow_weights[i] = v.iter().map(|e| e.weight).sum();
-        }
-
         for _ in 0..20 {
-            for (i, v) in self.g.iter().enumerate() {
-                let s: f64 = v
+            for i in 0..n {
+                let range = self.offsets[i]..self.offsets[i + 1];
+                let s: f64 = self.dst[range.clone()]
                     .iter()
-                    .map(|e| e.weight / outflow_weights[e.dst] * ranking_vector[e.dst])
+                    .zip(&self.share[range])
+                    .map(|(&d, &share)| share * ranking_vector[d])
                     .sum();
 
                 ranking_vector[i] = (1.0 - self.damping_factor) + self.damping_factor * s;
@@ -142,42 +158,32 @@ impl KeywordExtract for TextRank {
     /// );
     /// ```
     fn extract_keywords(&self, jieba: &Jieba, sentence: &str, top_k: usize, allowed_pos: Vec<String>) -> Vec<Keyword> {
-        let tags = jieba.tag(sentence, self.config.use_hmm());
-        let mut allowed_pos_set = BTreeSet::new();
+        // A handful of tags at most, so a scan beats building a set.
+        let allowed = |tag: &str| allowed_pos.is_empty() || allowed_pos.iter().any(|p| p == tag);
 
-        for s in allowed_pos {
-            allowed_pos_set.insert(s);
-        }
-
+        // Sized for the roughly one token per four bytes that Chinese text
+        // segments into, about half of them candidates.
+        let tokens_guess = sentence.len() / 4;
         let mut word2id: HashMap<&str, usize> =
-            HashMap::with_capacity_and_hasher(tags.len() / 2, rustc_hash::FxBuildHasher);
+            HashMap::with_capacity_and_hasher(tokens_guess / 2, rustc_hash::FxBuildHasher);
         // Each candidate word with the tag of its first occurrence, by id.
-        let mut unique_words: Vec<(&str, &str)> = Vec::with_capacity(tags.len() / 2);
-        for t in &tags {
-            if !allowed_pos_set.is_empty() && !allowed_pos_set.contains(t.tag) {
-                continue;
-            }
-            if !self.config.is_keyword(t.word) {
-                continue;
-            }
-
-            let next_id = unique_words.len();
-            word2id.entry(t.word).or_insert_with(|| {
-                unique_words.push((t.word, t.tag));
-                next_id
-            });
-        }
-
-        let candidate_ids: Vec<Option<usize>> = tags
-            .iter()
-            .map(|t| {
-                if !allowed_pos_set.is_empty() && !allowed_pos_set.contains(t.tag) {
-                    return None;
-                }
-
-                word2id.get(t.word).copied()
-            })
-            .collect();
+        let mut unique_words: Vec<(&str, &str)> = Vec::with_capacity(tokens_guess / 2);
+        // Per token, the id of its word if the token is a candidate. Tokens
+        // that are not keep their position, so the window is over the
+        // original token positions.
+        let mut candidate_ids: Vec<Option<usize>> = Vec::with_capacity(tokens_guess);
+        jieba.tag_each(sentence, self.config.use_hmm(), |t| {
+            let id = if allowed(t.tag) && self.config.is_keyword(t.word) {
+                let next_id = unique_words.len();
+                Some(*word2id.entry(t.word).or_insert_with(|| {
+                    unique_words.push((t.word, t.tag));
+                    next_id
+                }))
+            } else {
+                None
+            };
+            candidate_ids.push(id);
+        });
 
         let mut cooccurence: HashMap<(usize, usize), usize> = HashMap::default();
         for (i, &u) in candidate_ids.iter().enumerate() {
@@ -190,35 +196,37 @@ impl KeywordExtract for TextRank {
             }
         }
 
-        let mut diagram = StateDiagram::new(unique_words.len());
-        for (k, &v) in cooccurence.iter() {
-            diagram.add_undirected_edge(k.0, k.1, v as f64);
+        if top_k == 0 {
+            return Vec::new();
         }
 
-        let ranking_vector = diagram.rank();
+        let edges: Vec<(usize, usize, Weight)> = cooccurence.iter().map(|(&(u, v), &c)| (u, v, c as f64)).collect();
+        let ranking_vector = StateDiagram::new(unique_words.len(), &edges).rank();
 
-        let mut heap = BinaryHeap::new();
+        // The `top_k` best so far, the worst of them at the root.
+        let mut heap = BinaryHeap::with_capacity(top_k.min(ranking_vector.len()));
         for (k, v) in ranking_vector.iter().enumerate() {
-            heap.push(HeapNode {
+            let node = HeapNode {
                 rank: OrderedFloat(v * 1e10),
                 word_id: k,
-            });
-
-            if k >= top_k {
-                heap.pop();
+            };
+            if heap.len() < top_k {
+                heap.push(node);
+            } else if let Some(mut worst) = heap.peek_mut()
+                && node < *worst
+            {
+                *worst = node;
             }
         }
 
-        let mut res = Vec::with_capacity(top_k);
-        for _ in 0..top_k {
-            if let Some(w) = heap.pop() {
-                let (word, tag) = unique_words[w.word_id];
-                res.push(Keyword {
-                    keyword: word.to_string(),
-                    weight: w.rank.into_inner(),
-                    tag: String::from(tag),
-                });
-            }
+        let mut res = Vec::with_capacity(heap.len());
+        while let Some(w) = heap.pop() {
+            let (word, tag) = unique_words[w.word_id];
+            res.push(Keyword {
+                keyword: word.to_string(),
+                weight: w.rank.into_inner(),
+                tag: String::from(tag),
+            });
         }
 
         res.reverse();
@@ -253,8 +261,9 @@ mod tests {
 
     #[test]
     fn test_init_state_diagram() {
-        let diagram = StateDiagram::new(10);
-        assert_eq!(diagram.g.len(), 10);
+        let diagram = StateDiagram::new(10, &[]);
+        assert_eq!(diagram.offsets.len(), 11);
+        assert!(diagram.dst.is_empty());
     }
 
     #[test]

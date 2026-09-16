@@ -1,6 +1,6 @@
 use std::cmp::Ordering;
-use std::collections::{BTreeSet, BinaryHeap};
-use std::io::{self, BufRead, BufReader};
+use std::collections::BinaryHeap;
+use std::io::{self, BufRead};
 
 use include_flate::flate;
 use ordered_float::OrderedFloat;
@@ -9,7 +9,7 @@ use super::{Keyword, KeywordExtract, KeywordExtractConfig, KeywordExtractConfigB
 use crate::FxHashMap as HashMap;
 use crate::Jieba;
 
-flate!(static DEFAULT_IDF: str from "src/data/idf.txt");
+flate!(static DEFAULT_IDF: str from "src/data/idf.txt" with zstd);
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 struct HeapNode<'a> {
@@ -114,30 +114,47 @@ impl TfIdf {
     /// ```
     pub fn load_dict(&mut self, dict: &mut impl BufRead) -> io::Result<()> {
         let mut buf = String::new();
-        let mut idf_heap = BinaryHeap::new();
+        let mut idfs = Vec::new();
         while dict.read_line(&mut buf)? > 0 {
-            let parts: Vec<&str> = buf.split_whitespace().collect();
-            if parts.is_empty() {
-                continue;
-            }
-
-            let word = parts[0];
-            if let Some(idf) = parts.get(1).and_then(|x| x.parse::<f64>().ok()) {
-                self.idf_dict.insert(word.to_string(), idf);
-                idf_heap.push(OrderedFloat(idf));
-            }
-
+            self.load_line(&buf, &mut idfs);
             buf.clear();
         }
-
-        let m = idf_heap.len() / 2;
-        for _ in 0..m {
-            idf_heap.pop();
-        }
-
-        self.median_idf = idf_heap.pop().unwrap().into_inner();
-
+        self.set_median(idfs);
         Ok(())
+    }
+
+    /// Load a dictionary held in memory, line by line and without copying.
+    fn load_str(&mut self, dict: &str) {
+        let mut idfs = Vec::with_capacity(bytecount::count(dict.as_bytes(), b'\n') + 1);
+        self.idf_dict.reserve(idfs.capacity());
+        for line in dict.lines() {
+            self.load_line(line, &mut idfs);
+        }
+        self.set_median(idfs);
+    }
+
+    /// Add the `word idf` entry on `line`, if it is one, recording the
+    /// value in `idfs` as well.
+    #[inline]
+    fn load_line(&mut self, line: &str, idfs: &mut Vec<OrderedFloat<f64>>) {
+        let mut parts = line.split_whitespace();
+        if let Some(word) = parts.next()
+            && let Some(idf) = parts.next().and_then(|x| x.parse::<f64>().ok())
+        {
+            self.idf_dict.insert(word.to_string(), idf);
+            idfs.push(OrderedFloat(idf));
+        }
+    }
+
+    /// The median of the IDFs of one load, duplicates included, so that it
+    /// is over what was read rather than over the merged dictionary. It is
+    /// the lower median: the value with `len / 2` values above it, which is
+    /// ascending index `(len - 1) / 2`. Selection is linear, where the heap
+    /// this replaced popped half the values one by one.
+    fn set_median(&mut self, mut idfs: Vec<OrderedFloat<f64>>) {
+        let mid = idfs.len().saturating_sub(1) / 2;
+        let (_, median, _) = idfs.select_nth_unstable(mid);
+        self.median_idf = median.into_inner();
     }
 
     pub fn config(&self) -> &KeywordExtractConfig {
@@ -156,8 +173,9 @@ impl Default for TfIdf {
     /// Creates TfIdf with DEFAULT_STOP_WORDS, the default TfIdf dictionary,
     /// 2 Unicode Scalar Value minimum for keywords, and no hmm in segmentation.
     fn default() -> Self {
-        let mut default_dict = BufReader::new(DEFAULT_IDF.as_bytes());
-        TfIdf::new(Some(&mut default_dict), KeywordExtractConfigBuilder::default().build())
+        let mut instance = TfIdf::new(None::<&mut io::Empty>, KeywordExtractConfigBuilder::default().build());
+        instance.load_str(&DEFAULT_IDF);
+        instance
     }
 }
 
@@ -208,50 +226,47 @@ impl KeywordExtract for TfIdf {
     /// );
     /// ```
     fn extract_keywords(&self, jieba: &Jieba, sentence: &str, top_k: usize, allowed_pos: Vec<String>) -> Vec<Keyword> {
-        let tags = jieba.tag(sentence, self.config.use_hmm());
-        let mut allowed_pos_set = BTreeSet::new();
+        // A handful of tags at most, so a scan beats building a set.
+        let allowed = |tag: &str| allowed_pos.is_empty() || allowed_pos.iter().any(|p| p == tag);
 
-        for s in allowed_pos {
-            allowed_pos_set.insert(s);
-        }
-
-        // Per word: its frequency and the tag of its first occurrence.
+        // Per word: its frequency and the tag of its first occurrence,
+        // counted as the tags come rather than from a materialised list.
         let mut term_freq: HashMap<&str, (u64, &str)> = HashMap::default();
-        for t in &tags {
-            if !allowed_pos_set.is_empty() && !allowed_pos_set.contains(t.tag) {
-                continue;
+        jieba.tag_each(sentence, self.config.use_hmm(), |t| {
+            if allowed(t.tag) && self.config.is_keyword(t.word) {
+                term_freq.entry(t.word).or_insert((0, t.tag)).0 += 1;
             }
+        });
 
-            if !self.config.is_keyword(t.word) {
-                continue;
-            }
-
-            term_freq.entry(t.word).or_insert((0, t.tag)).0 += 1;
+        if top_k == 0 {
+            return Vec::new();
         }
 
         let total: u64 = term_freq.values().map(|(tf, _)| tf).sum();
-        let mut heap = BinaryHeap::new();
-        for (cnt, (k, (tf, _))) in term_freq.iter().enumerate() {
+        // The `top_k` best so far, the worst of them at the root.
+        let mut heap = BinaryHeap::with_capacity(top_k.min(term_freq.len()));
+        for (k, (tf, _)) in term_freq.iter() {
             let idf = self.idf_dict.get(*k).unwrap_or(&self.median_idf);
             let node = HeapNode {
                 tfidf: OrderedFloat(*tf as f64 * idf / total as f64),
                 word: k,
             };
-            heap.push(node);
-            if cnt >= top_k {
-                heap.pop();
+            if heap.len() < top_k {
+                heap.push(node);
+            } else if let Some(mut worst) = heap.peek_mut()
+                && node < *worst
+            {
+                *worst = node;
             }
         }
 
-        let mut res = Vec::with_capacity(top_k);
-        for _ in 0..top_k {
-            if let Some(w) = heap.pop() {
-                res.push(Keyword {
-                    keyword: String::from(w.word),
-                    weight: w.tfidf.into_inner(),
-                    tag: String::from(term_freq.get(w.word).map_or("", |(_, tag)| tag)),
-                });
-            }
+        let mut res = Vec::with_capacity(heap.len());
+        while let Some(w) = heap.pop() {
+            res.push(Keyword {
+                keyword: String::from(w.word),
+                weight: w.tfidf.into_inner(),
+                tag: String::from(term_freq.get(w.word).map_or("", |(_, tag)| tag)),
+            });
         }
 
         res.reverse();
