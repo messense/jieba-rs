@@ -156,6 +156,7 @@ impl Scratch {
         release(&mut self.route);
         release(&mut self.chars);
         self.dag.release_if_huge();
+        self.hmm.release_if_huge();
     }
 }
 

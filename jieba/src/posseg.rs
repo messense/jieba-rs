@@ -244,6 +244,24 @@ struct Scratch {
     next_live: Vec<(u16, f64)>,
 }
 
+impl Scratch {
+    /// Drop buffers that a very long word grew, so a thread that once tagged
+    /// a huge span does not pin that memory forever.
+    fn release_if_huge(&mut self) {
+        const MAX_RETAINED_BYTES: usize = 4 << 20;
+        fn release<T>(buf: &mut Vec<T>) {
+            if buf.capacity() * std::mem::size_of::<T>() > MAX_RETAINED_BYTES {
+                *buf = Vec::new();
+            }
+        }
+        release(&mut self.chars);
+        release(&mut self.prev);
+        release(&mut self.path);
+        release(&mut self.live);
+        release(&mut self.next_live);
+    }
+}
+
 /// Position-group boundaries of a state list sorted ascending by state.
 fn pos_bounds(states: &[(u16, f64)]) -> [u16; NUM_POS + 1] {
     let mut bounds = [0u16; NUM_POS + 1];
@@ -288,11 +306,6 @@ fn viterbi_posseg<'a>(data: &'a PossegData, scratch: &mut Scratch, mut emit: imp
         return;
     }
 
-    // Backpointer table: still need full c_len × NUM_STATES for traceback
-    let prev = &mut scratch.prev;
-    prev.clear();
-    prev.resize(c_len * NUM_STATES, u16::MAX);
-
     // Only reachable states are carried from one step to the next, ascending
     // by state so that `bounds` delimits their position groups. A state that
     // scores `MIN_FLOAT` can never be chosen later, so dropping it is exact.
@@ -308,7 +321,19 @@ fn viterbi_posseg<'a>(data: &'a PossegData, scratch: &mut Scratch, mut emit: imp
             live.push((s, prob));
         }
     }
+    // Once no state is reachable none can become so, and the search below
+    // would end with nothing to trace back; give the whole span the
+    // fallback tag now, before sizing the backpointer table for it.
+    if live.is_empty() {
+        emit((chars[0].0, str_end, "x"));
+        return;
+    }
     let mut bounds = pos_bounds(live);
+
+    // Backpointer table: still need full c_len × NUM_STATES for traceback
+    let prev = &mut scratch.prev;
+    prev.clear();
+    prev.resize(c_len * NUM_STATES, u16::MAX);
 
     // Recurse
     for t in 1..c_len {
@@ -343,6 +368,10 @@ fn viterbi_posseg<'a>(data: &'a PossegData, scratch: &mut Scratch, mut emit: imp
         }
 
         std::mem::swap(live, next_live);
+        if live.is_empty() {
+            emit((chars[0].0, str_end, "x"));
+            return;
+        }
         bounds = pos_bounds(live);
     }
 
@@ -457,6 +486,7 @@ pub(crate) fn guess_tag(word: &str) -> &'static str {
                 best = Some((len, tag));
             }
         });
+        scratch.release_if_huge();
     });
     best.map_or("x", |(_, tag)| tag)
 }

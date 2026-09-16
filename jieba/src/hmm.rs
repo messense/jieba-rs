@@ -200,6 +200,23 @@ pub(crate) struct HmmContext {
     chars: Vec<(usize, char)>,
 }
 
+impl HmmContext {
+    /// Drop buffers that a very long run grew, so a thread that once ran
+    /// the HMM over a huge span does not pin that memory forever.
+    pub(crate) fn release_if_huge(&mut self) {
+        const MAX_RETAINED_BYTES: usize = 4 << 20;
+        fn release<T>(buf: &mut Vec<T>) {
+            if buf.capacity() * std::mem::size_of::<T>() > MAX_RETAINED_BYTES {
+                *buf = Vec::new();
+            }
+        }
+        release(&mut self.v);
+        release(&mut self.prev);
+        release(&mut self.best_path);
+        release(&mut self.chars);
+    }
+}
+
 #[allow(non_snake_case)]
 fn viterbi(sentence: &str, params: &impl HmmParams, hmm_context: &mut HmmContext) {
     const R: usize = NUM_STATES;
