@@ -245,20 +245,12 @@ struct Scratch {
 }
 
 impl Scratch {
-    /// Drop buffers that a very long word grew, so a thread that once tagged
-    /// a huge span does not pin that memory forever.
     fn release_if_huge(&mut self) {
-        const MAX_RETAINED_BYTES: usize = 4 << 20;
-        fn release<T>(buf: &mut Vec<T>) {
-            if buf.capacity() * std::mem::size_of::<T>() > MAX_RETAINED_BYTES {
-                *buf = Vec::new();
-            }
-        }
-        release(&mut self.chars);
-        release(&mut self.prev);
-        release(&mut self.path);
-        release(&mut self.live);
-        release(&mut self.next_live);
+        crate::release_if_huge(&mut self.chars, crate::SCRATCH_BUDGET);
+        crate::release_if_huge(&mut self.prev, crate::SCRATCH_BUDGET);
+        crate::release_if_huge(&mut self.path, crate::SCRATCH_BUDGET);
+        crate::release_if_huge(&mut self.live, crate::SCRATCH_BUDGET);
+        crate::release_if_huge(&mut self.next_live, crate::SCRATCH_BUDGET);
     }
 }
 
@@ -330,10 +322,13 @@ fn viterbi_posseg<'a>(data: &'a PossegData, scratch: &mut Scratch, mut emit: imp
     }
     let mut bounds = pos_bounds(live);
 
-    // Backpointer table: still need full c_len × NUM_STATES for traceback
+    // Backpointer table, `c_len × NUM_STATES`. The traceback only reads the
+    // entries of live states, which this call writes first, so stale
+    // contents from a previous word are never observed.
     let prev = &mut scratch.prev;
-    prev.clear();
-    prev.resize(c_len * NUM_STATES, u16::MAX);
+    if prev.len() < c_len * NUM_STATES {
+        prev.resize(c_len * NUM_STATES, u16::MAX);
+    }
 
     // Recurse
     for t in 1..c_len {
@@ -401,11 +396,8 @@ fn viterbi_posseg<'a>(data: &'a PossegData, scratch: &mut Scratch, mut emit: imp
     path[last_t] = best_state;
     for t in (1..c_len).rev() {
         let backptr = prev[t * NUM_STATES + path[t] as usize];
-        if backptr == u16::MAX {
-            // Unreachable path — return whole span as fallback
-            emit((chars[0].0, str_end, "x"));
-            return;
-        }
+        // A live state was reached from a live state.
+        debug_assert_ne!(backptr, u16::MAX);
         path[t - 1] = backptr;
     }
 
@@ -457,36 +449,35 @@ fn viterbi_posseg<'a>(data: &'a PossegData, scratch: &mut Scratch, mut emit: imp
 /// lifetime because it references the lazily-initialized static data.
 #[cfg(all(test, feature = "default-dict"))]
 fn cut_with_pos(sentence: &str) -> Vec<(&str, &'static str)> {
-    let data = posseg_data();
     let mut spans = Vec::new();
+    for_each_span(sentence, |(start, end, tag)| spans.push((&sentence[start..end], tag)));
+    spans
+}
+
+/// Runs the compound HMM over `text` on this thread's scratch and feeds
+/// each decoded span to `emit`, in order.
+#[cfg(feature = "default-dict")]
+fn for_each_span(text: &str, emit: impl FnMut(Span<'static>)) {
+    let data = posseg_data();
     SCRATCH.with(|scratch| {
         let mut scratch = scratch.borrow_mut();
         scratch.chars.clear();
-        scratch.chars.extend(sentence.char_indices());
-        viterbi_posseg(data, &mut scratch, |(start, end, tag)| {
-            spans.push((&sentence[start..end], tag))
-        });
+        scratch.chars.extend(text.char_indices());
+        viterbi_posseg(data, &mut scratch, emit);
+        scratch.release_if_huge();
     });
-    spans
 }
 
 /// The tag for an OOV word: the tag of the longest span the compound HMM
 /// finds in it (the last such span on ties), or `"x"` for an empty word.
 #[cfg(feature = "default-dict")]
 pub(crate) fn guess_tag(word: &str) -> &'static str {
-    let data = posseg_data();
     let mut best: Option<(usize, &'static str)> = None;
-    SCRATCH.with(|scratch| {
-        let mut scratch = scratch.borrow_mut();
-        scratch.chars.clear();
-        scratch.chars.extend(word.char_indices());
-        viterbi_posseg(data, &mut scratch, |(start, end, tag)| {
-            let len = end - start;
-            if best.is_none_or(|(best_len, _)| len >= best_len) {
-                best = Some((len, tag));
-            }
-        });
-        scratch.release_if_huge();
+    for_each_span(word, |(start, end, tag)| {
+        let len = end - start;
+        if best.is_none_or(|(best_len, _)| len >= best_len) {
+            best = Some((len, tag));
+        }
     });
     best.map_or("x", |(_, tag)| tag)
 }

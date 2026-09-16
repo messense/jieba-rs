@@ -47,10 +47,11 @@ pub fn generate_hmm_data(_input: TokenStream) -> TokenStream {
         }
     }
 
-    // The segmenter only runs the HMM over `[\u{4E00}-\u{9FD5}]` blocks, so
-    // the emission table is a direct index over that range: `EMIT_INDEX` maps
-    // `ch - EMIT_MIN_CHAR` to a row of `EMIT_PROBS`, or `EMIT_NONE`. Keys
-    // outside the range can never be looked up and are dropped.
+    // The segmenter only runs the HMM over `[HMM_HAN_MIN-HMM_HAN_MAX]`
+    // blocks (the range is emitted for it to use), so the emission table is
+    // a direct index over that range: `EMIT_INDEX` maps `ch - EMIT_MIN_CHAR`
+    // to a row of `EMIT_PROBS`, or `EMIT_NONE`. Keys outside the range can
+    // never be looked up and are dropped.
     const HMM_HAN_MIN: u32 = 0x4E00;
     const HMM_HAN_MAX: u32 = 0x9FD5;
     let in_range: Vec<(u32, &[String; 4])> = emit_probs
@@ -71,6 +72,8 @@ pub fn generate_hmm_data(_input: TokenStream) -> TokenStream {
         index[(ch - min_char) as usize] = row as u16;
     }
 
+    output.push_str(&format!("pub const HMM_HAN_MIN: char = '\\u{{{HMM_HAN_MIN:X}}}';\n"));
+    output.push_str(&format!("pub const HMM_HAN_MAX: char = '\\u{{{HMM_HAN_MAX:X}}}';\n"));
     output.push_str(&format!("pub const EMIT_MIN_CHAR: u32 = {min_char:#x};\n"));
     output.push_str("pub const EMIT_NONE: u16 = u16::MAX;\n\n");
 

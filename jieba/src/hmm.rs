@@ -5,10 +5,11 @@ use crate::SplitByCharacterClass;
 use crate::errors::Error;
 use jieba_macros::generate_hmm_data;
 
-/// HMM-specific CJK range `[\u{4E00}-\u{9FD5}]`
+/// HMM-specific CJK range `[\u{4E00}-\u{9FD5}]`, the range the generated
+/// emission table covers.
 #[inline]
 fn is_hmm_han(c: char) -> bool {
-    matches!(c, '\u{4E00}'..='\u{9FD5}')
+    matches!(c, HMM_HAN_MIN..=HMM_HAN_MAX)
 }
 
 /// Characters that join two alphanumeric runs into one token.
@@ -201,19 +202,11 @@ pub(crate) struct HmmContext {
 }
 
 impl HmmContext {
-    /// Drop buffers that a very long run grew, so a thread that once ran
-    /// the HMM over a huge span does not pin that memory forever.
     pub(crate) fn release_if_huge(&mut self) {
-        const MAX_RETAINED_BYTES: usize = 4 << 20;
-        fn release<T>(buf: &mut Vec<T>) {
-            if buf.capacity() * std::mem::size_of::<T>() > MAX_RETAINED_BYTES {
-                *buf = Vec::new();
-            }
-        }
-        release(&mut self.v);
-        release(&mut self.prev);
-        release(&mut self.best_path);
-        release(&mut self.chars);
+        crate::release_if_huge(&mut self.v, crate::SCRATCH_BUDGET);
+        crate::release_if_huge(&mut self.prev, crate::SCRATCH_BUDGET);
+        crate::release_if_huge(&mut self.best_path, crate::SCRATCH_BUDGET);
+        crate::release_if_huge(&mut self.chars, crate::SCRATCH_BUDGET);
     }
 }
 

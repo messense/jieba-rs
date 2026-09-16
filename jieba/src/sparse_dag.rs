@@ -2,10 +2,10 @@
 /// the character after a dictionary word starting there, carrying the id of
 /// that word.
 ///
-/// Positions are the block's characters in order: `start()` opens the edge
-/// list of the next character, `insert` appends to it, and `commit`
-/// terminates it with a 0 sentinel. Lists are then read back by character
-/// index.
+/// Edges arrive through `push_edge` grouped by character in increasing
+/// order, each character's list terminated by a 0 sentinel, and `finish`
+/// closes the lists of the remaining characters. Lists are then read back
+/// by character index.
 #[derive(Default)]
 pub(crate) struct StaticSparseDAG {
     /// Edge lists, one per character, each terminated by a 0 sentinel.
@@ -41,14 +41,24 @@ fn decode_edge(val: u64) -> (usize, i32) {
 pub(crate) const NO_MATCH: i32 = i32::MIN;
 
 impl StaticSparseDAG {
-    /// Drop the edge storage if a very large block grew it past what is
-    /// worth keeping around between calls.
     pub(crate) fn release_if_huge(&mut self) {
-        const MAX_RETAINED_EDGES: usize = 4_000_000;
-        if self.array.capacity() > MAX_RETAINED_EDGES {
-            self.array = Vec::new();
-            self.start_pos = Vec::new();
-        }
+        // Edge lists are the largest scratch by far when the dictionary has
+        // many long words, and regrowing them costs more than keeping them,
+        // so they get several times the usual budget.
+        const MAX_RETAINED_BYTES: usize = 8 * crate::SCRATCH_BUDGET;
+        crate::release_if_huge(&mut self.array, MAX_RETAINED_BYTES);
+        crate::release_if_huge(&mut self.start_pos, MAX_RETAINED_BYTES);
+    }
+
+    /// The id of the dictionary word spanning characters `start..end`, if
+    /// there is one. Edges are ordered by end, so the scan stops at the
+    /// first one reaching `end`.
+    #[inline]
+    pub(crate) fn word_at(&self, start: usize, end: usize) -> Option<i32> {
+        self.iter_edges(start)
+            .find(|&(e, _)| e >= end)
+            .filter(|&(e, _)| e == end)
+            .map(|(_, word_id)| word_id)
     }
 
     /// Record a word spanning characters `char_idx..end`.

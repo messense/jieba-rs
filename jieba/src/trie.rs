@@ -93,12 +93,6 @@ fn filter_bits(ch: char) -> (u64, u32) {
     (1u64 << (KEY_BITS + (h >> 28)), 1u32 << (ID_BITS + ((h >> 25) & 7)))
 }
 
-impl Default for CharTrie {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl CharTrie {
     pub(crate) fn new() -> Self {
         Self::with_slots(1 << 10)
@@ -169,19 +163,25 @@ impl CharTrie {
         // The root has no key filter; only the pointer filter applies.
         let mut key_filter = u64::MAX;
         for ch in chars {
-            let (a, b) = filter_bits(ch);
-            if key_filter & a == 0 || child & b == 0 {
-                return None;
-            }
-            let slot = &self.slots[self.probe(key(child & ID_MASK, ch))];
-            if slot.key == 0 {
-                return None;
-            }
+            let slot = self.step(key_filter, child, ch)?;
             key_filter = slot.key;
             child = slot.child;
             word_id = slot.word_id;
         }
         (word_id != NO_WORD).then_some(word_id)
+    }
+
+    /// The slot of the child reached from node `child` (with its key
+    /// `key_filter`) on `ch`, if the node has one. The filters in the spare
+    /// bits of both reject most absent children before the probe.
+    #[inline(always)]
+    fn step(&self, key_filter: u64, child: u32, ch: char) -> Option<&Slot> {
+        let (a, b) = filter_bits(ch);
+        if key_filter & a == 0 || child & b == 0 {
+            return None;
+        }
+        let slot = &self.slots[self.probe(key(child & ID_MASK, ch))];
+        (slot.key != 0).then_some(slot)
     }
 
     /// Call `emit(char_index, end_index, word_id)` for every dictionary word
@@ -222,6 +222,9 @@ impl CharTrie {
                 if next >= n {
                     break;
                 }
+                // The same transition as `step`, written out: the walk is the
+                // hottest loop in the crate, and going through the helper
+                // measurably slowed it down.
                 let (_, ch) = chars[next];
                 let (a, b) = filter_bits(ch);
                 if key_filter & a == 0 || child & b == 0 {
