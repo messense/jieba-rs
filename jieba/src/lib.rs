@@ -764,28 +764,23 @@ impl Jieba {
         base: usize,
         block_unicode_start: usize,
         tokens: &mut Vec<Token<'a>>,
-        dag: &mut StaticSparseDAG,
     ) {
-        self.dag(chars, dag);
-
-        let block_base = block.as_ptr() as usize;
-        let byte_offset_in_sentence = block_base - base;
-
-        for (idx, &(byte_start, _)) in chars.iter().enumerate() {
-            let byte_start = byte_start as usize;
-            for (end, _) in dag.iter_edges(idx) {
-                let word = &block[byte_start..Self::byte_at(block, chars, end)];
-                let bs = byte_offset_in_sentence + byte_start;
-                tokens.push(Token {
-                    word,
-                    start: block_unicode_start + idx,
-                    end: block_unicode_start + end,
-                    byte_start: bs,
-                    byte_end: bs + word.len(),
-                });
-            }
-        }
-        dag.clear();
+        // The trie walk visits the words in output order, so the tokens
+        // come straight from it; nothing else reads this block's matches,
+        // so no DAG is built.
+        let byte_offset_in_sentence = block.as_ptr() as usize - base;
+        self.trie.for_each_prefix_at_every_char(chars, |idx, end, _| {
+            let byte_start = chars[idx].0 as usize;
+            let word = &block[byte_start..Self::byte_at(block, chars, end)];
+            let bs = byte_offset_in_sentence + byte_start;
+            tokens.push(Token {
+                word,
+                start: block_unicode_start + idx,
+                end: block_unicode_start + end,
+                byte_start: bs,
+                byte_end: bs + word.len(),
+            });
+        });
     }
 
     /// Emit the word spanning characters `x..y` of `block` with `word_id`.
@@ -1041,7 +1036,7 @@ impl Jieba {
 
         SCRATCH.with(|scratch| {
             let mut scratch = scratch.borrow_mut();
-            let Scratch { dag, chars, .. } = &mut *scratch;
+            let Scratch { chars, .. } = &mut *scratch;
             let mut splitter = SplitByCharacterClass::new(sentence, is_han_cut_all);
 
             while let Some(state) = splitter.next_recording(chars) {
@@ -1050,7 +1045,7 @@ impl Jieba {
                         assert!(!block.is_empty());
                         let block_unicode_start = unicode_offset;
                         unicode_offset += chars.len();
-                        self.cut_all_tokens(block, chars, base, block_unicode_start, &mut tokens, dag);
+                        self.cut_all_tokens(block, chars, base, block_unicode_start, &mut tokens);
                     }
                     SplitState::Unmatched(block) => {
                         assert!(!block.is_empty());
