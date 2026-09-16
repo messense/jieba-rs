@@ -9,55 +9,71 @@ use crate::Jieba;
 
 type Weight = f64;
 
-#[derive(Clone)]
-struct Edge {
-    dst: usize,
-    weight: Weight,
-}
-
-impl Edge {
-    fn new(dst: usize, weight: Weight) -> Edge {
-        Edge { dst, weight }
-    }
-}
-
-type Edges = Vec<Edge>;
-type Graph = Vec<Edges>;
-
+/// The co-occurrence graph, in compressed sparse row form: the neighbours
+/// of vertex `v` are `dst[offsets[v]..offsets[v + 1]]`, and each carries the
+/// share of `dst`'s rank it hands to `v`, `edge weight / total weight out of
+/// dst`, which is constant across the ranking sweeps.
 struct StateDiagram {
     damping_factor: Weight,
-    g: Graph,
+    offsets: Vec<usize>,
+    dst: Vec<usize>,
+    share: Vec<Weight>,
 }
 
 impl StateDiagram {
-    fn new(size: usize) -> Self {
+    /// Build the graph of `size` vertices from undirected weighted edges.
+    /// Each vertex's neighbours keep the order the edges were given in.
+    fn new(size: usize, edges: &[(usize, usize, Weight)]) -> Self {
+        // Counting sort by source: each undirected edge is an entry in both
+        // endpoints' lists.
+        let mut offsets = vec![0usize; size + 1];
+        for &(u, v, _) in edges {
+            offsets[u + 1] += 1;
+            offsets[v + 1] += 1;
+        }
+        for i in 0..size {
+            offsets[i + 1] += offsets[i];
+        }
+        let m = offsets[size];
+        let mut dst = vec![0usize; m];
+        let mut weight = vec![0.0; m];
+        let mut next = offsets[..size].to_vec();
+        for &(u, v, w) in edges {
+            dst[next[u]] = v;
+            weight[next[u]] = w;
+            next[u] += 1;
+            dst[next[v]] = u;
+            weight[next[v]] = w;
+            next[v] += 1;
+        }
+
+        let mut outflow = vec![0.0; size];
+        for v in 0..size {
+            outflow[v] = weight[offsets[v]..offsets[v + 1]].iter().sum();
+        }
+        let share = dst.iter().zip(&weight).map(|(&d, &w)| w / outflow[d]).collect();
+
         StateDiagram {
             damping_factor: 0.85,
-            g: vec![Vec::new(); size],
+            offsets,
+            dst,
+            share,
         }
     }
 
-    fn add_undirected_edge(&mut self, src: usize, dst: usize, weight: Weight) {
-        self.g[src].push(Edge::new(dst, weight));
-        self.g[dst].push(Edge::new(src, weight));
-    }
-
-    fn rank(&mut self) -> Vec<Weight> {
-        let n = self.g.len();
+    fn rank(&self) -> Vec<Weight> {
+        let n = self.offsets.len() - 1;
         let default_weight = 1.0 / (n as f64);
 
         let mut ranking_vector = vec![default_weight; n];
 
-        let mut outflow_weights = vec![0.0; n];
-        for (i, v) in self.g.iter().enumerate() {
-            outflow_weights[i] = v.iter().map(|e| e.weight).sum();
-        }
-
         for _ in 0..20 {
-            for (i, v) in self.g.iter().enumerate() {
-                let s: f64 = v
+            for i in 0..n {
+                let range = self.offsets[i]..self.offsets[i + 1];
+                let s: f64 = self.dst[range.clone()]
                     .iter()
-                    .map(|e| e.weight / outflow_weights[e.dst] * ranking_vector[e.dst])
+                    .zip(&self.share[range])
+                    .map(|(&d, &share)| share * ranking_vector[d])
                     .sum();
 
                 ranking_vector[i] = (1.0 - self.damping_factor) + self.damping_factor * s;
@@ -190,12 +206,8 @@ impl KeywordExtract for TextRank {
             }
         }
 
-        let mut diagram = StateDiagram::new(unique_words.len());
-        for (k, &v) in cooccurence.iter() {
-            diagram.add_undirected_edge(k.0, k.1, v as f64);
-        }
-
-        let ranking_vector = diagram.rank();
+        let edges: Vec<(usize, usize, Weight)> = cooccurence.iter().map(|(&(u, v), &c)| (u, v, c as f64)).collect();
+        let ranking_vector = StateDiagram::new(unique_words.len(), &edges).rank();
 
         let mut heap = BinaryHeap::new();
         for (k, v) in ranking_vector.iter().enumerate() {
@@ -253,8 +265,9 @@ mod tests {
 
     #[test]
     fn test_init_state_diagram() {
-        let diagram = StateDiagram::new(10);
-        assert_eq!(diagram.g.len(), 10);
+        let diagram = StateDiagram::new(10, &[]);
+        assert_eq!(diagram.offsets.len(), 11);
+        assert!(diagram.dst.is_empty());
     }
 
     #[test]
