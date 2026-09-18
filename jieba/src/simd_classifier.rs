@@ -254,37 +254,6 @@ mod x86 {
         [deinterleave_idx(2, 0), deinterleave_idx(2, 1), deinterleave_idx(2, 2)],
     ];
 
-    const fn join16(lo: [u8; 16], hi: [u8; 16]) -> [u8; 32] {
-        let mut out = [0u8; 32];
-        let mut i = 0usize;
-        while i < 16 {
-            out[i] = lo[i];
-            out[16 + i] = hi[i];
-            i += 1;
-        }
-        out
-    }
-
-    /// IDX2[stream][register]: 96 bytes hold two 48-byte units, so the 32-byte
-    /// registers hold block phases [0|1], [2|0] and [1|2].
-    const IDX2: [[[u8; 32]; 3]; 3] = [
-        [
-            join16(IDX[0][0], IDX[0][1]),
-            join16(IDX[0][2], IDX[0][0]),
-            join16(IDX[0][1], IDX[0][2]),
-        ],
-        [
-            join16(IDX[1][0], IDX[1][1]),
-            join16(IDX[1][2], IDX[1][0]),
-            join16(IDX[1][1], IDX[1][2]),
-        ],
-        [
-            join16(IDX[2][0], IDX[2][1]),
-            join16(IDX[2][2], IDX[2][0]),
-            join16(IDX[2][1], IDX[2][2]),
-        ],
-    ];
-
     /// `vpermt2b`/`vpermb` indices deinterleaving 192 bytes held in three
     /// 64-byte registers: the first permute covers byte positions below 128,
     /// the masked second permute covers positions in the third register.
@@ -351,10 +320,19 @@ mod x86 {
             let y0 = _mm256_loadu_si256(input.as_ptr().cast());
             let y1 = _mm256_loadu_si256(input.as_ptr().add(32).cast());
             let y2 = _mm256_loadu_si256(input.as_ptr().add(64).cast());
+            // `vpshufb` shuffles within each 128-bit lane, so pair up the
+            // 16-byte blocks that share a phase: the low lanes hold the first
+            // 48-byte unit and the high lanes the second.
+            let phase = [
+                _mm256_permute2x128_si256::<0x30>(y0, y1),
+                _mm256_permute2x128_si256::<0x21>(y0, y2),
+                _mm256_permute2x128_si256::<0x30>(y1, y2),
+            ];
             let gather = |stream: usize| {
-                let a = _mm256_shuffle_epi8(y0, _mm256_loadu_si256(IDX2[stream][0].as_ptr().cast()));
-                let b = _mm256_shuffle_epi8(y1, _mm256_loadu_si256(IDX2[stream][1].as_ptr().cast()));
-                let c = _mm256_shuffle_epi8(y2, _mm256_loadu_si256(IDX2[stream][2].as_ptr().cast()));
+                let idx = |p: usize| _mm256_broadcastsi128_si256(_mm_loadu_si128(IDX[stream][p].as_ptr().cast()));
+                let a = _mm256_shuffle_epi8(phase[0], idx(0));
+                let b = _mm256_shuffle_epi8(phase[1], idx(1));
+                let c = _mm256_shuffle_epi8(phase[2], idx(2));
                 _mm256_or_si256(_mm256_or_si256(a, b), c)
             };
             let b0 = gather(0);
@@ -656,8 +634,10 @@ mod tests {
 
         #[test]
         fn cjk_gate_reports_none_for_wider_or_shorter_encodings() {
-            for intruder in ["a", "é", "🙂", "\u{7ff}"] {
-                for pos in [0usize, 1, 15, 16, 31, 33] {
+            // "，" passes the three-byte gate but ends the common-CJK count.
+            for intruder in ["a", "é", "🙂", "\u{7ff}", "，"] {
+                // Every triplet position of the widest block, and one past it.
+                for pos in 0usize..=64 {
                     let mut s = "中".repeat(80);
                     s.insert_str(pos * 3, intruder);
                     let expected = |cap: usize| cjk_ref(&s, cap);
