@@ -96,6 +96,7 @@ mod hmm;
 #[cfg(any(feature = "tfidf", feature = "textrank"))]
 mod keywords;
 mod posseg;
+mod simd_classifier;
 mod sparse_dag;
 mod trie;
 
@@ -237,6 +238,11 @@ fn char_count(s: &str) -> usize {
     }
 }
 
+/// How many characters of a matched run are classified one by one before the
+/// SIMD classifier takes over: ordinary text is made of runs shorter than
+/// this, which the scalar loop handles faster than a block load.
+const SCALAR_RUN: usize = 16;
+
 /// Iterator that splits text into matched/unmatched regions by a character classifier.
 /// Matched = maximal runs where `classify(c)` is true.
 /// Unmatched = everything between matched runs.
@@ -244,12 +250,33 @@ pub(crate) struct SplitByCharacterClass<'t, F> {
     text: &'t str,
     pos: usize,
     classify: F,
+    /// `classify` is [`is_han_default`], so matched runs may be extended in
+    /// bulk by [`simd_classifier::prefix`].
+    han_default: bool,
+}
+
+impl<'t> SplitByCharacterClass<'t, ()> {
+    /// Split by [`is_han_default`], skipping over long matched runs with SIMD.
+    #[inline]
+    fn han_default(text: &'t str) -> SplitByCharacterClass<'t, impl Fn(char) -> bool> {
+        SplitByCharacterClass {
+            text,
+            pos: 0,
+            classify: is_han_default,
+            han_default: true,
+        }
+    }
 }
 
 impl<'t, F: Fn(char) -> bool> SplitByCharacterClass<'t, F> {
     #[inline]
     fn new(text: &'t str, classify: F) -> Self {
-        SplitByCharacterClass { text, pos: 0, classify }
+        SplitByCharacterClass {
+            text,
+            pos: 0,
+            classify,
+            han_default: false,
+        }
     }
 
     /// The next run, with each of its characters recorded in `chars` as
@@ -274,12 +301,22 @@ impl<'t, F: Fn(char) -> bool> SplitByCharacterClass<'t, F> {
         let matched = (self.classify)(first);
         record(0, first);
         let mut end = start + first.len_utf8();
+        let mut budget = if matched && self.han_default {
+            SCALAR_RUN
+        } else {
+            usize::MAX
+        };
         for (i, c) in iter {
             if (self.classify)(c) != matched {
                 break;
             }
             record(i, c);
             end = start + i + c.len_utf8();
+            budget -= 1;
+            if budget == 0 {
+                end = self.extend_han_default(start, end, &mut record);
+                break;
+            }
         }
         self.pos = end;
         let run = &text[start..end];
@@ -288,6 +325,45 @@ impl<'t, F: Fn(char) -> bool> SplitByCharacterClass<'t, F> {
         } else {
             SplitState::Unmatched(run)
         })
+    }
+}
+
+impl<'t, F: Fn(char) -> bool> SplitByCharacterClass<'t, F> {
+    /// Extend a matched [`is_han_default`] run that began at `start` and has
+    /// reached `end`, returning its final end. Whole blocks accepted by the
+    /// SIMD classifier are recorded without classifying, or fully decoding,
+    /// each character; everything else takes the scalar step.
+    #[inline]
+    fn extend_han_default(&self, start: usize, mut end: usize, record: &mut impl FnMut(usize, char)) -> usize {
+        let text = self.text;
+        loop {
+            let rest = &text.as_bytes()[end..];
+            let n = simd_classifier::prefix(rest);
+            let block = &rest[..n];
+            let offset = end - start;
+            if block.first().is_some_and(u8::is_ascii) {
+                for (i, &b) in block.iter().enumerate() {
+                    record(offset + i, b as char);
+                }
+            } else {
+                for (i, b) in block.as_chunks::<3>().0.iter().enumerate() {
+                    let code = (b[0] as u32 & 0x0f) << 12 | (b[1] as u32 & 0x3f) << 6 | (b[2] as u32 & 0x3f);
+                    // SAFETY: the classifier accepted these three bytes as a
+                    // character of U+4E00..=U+9FFF, which holds no surrogate.
+                    record(offset + 3 * i, unsafe { char::from_u32_unchecked(code) });
+                }
+            }
+            end += n;
+            // A block mostly ends at a character the classifier rejects, and
+            // so does a run: take a scalar step before trying another block.
+            match text[end..].chars().next() {
+                Some(c) if (self.classify)(c) => {
+                    record(end - start, c);
+                    end += c.len_utf8();
+                }
+                _ => return end,
+            }
+        }
     }
 }
 
@@ -960,7 +1036,7 @@ impl Jieba {
                 chars,
                 hmm: hmm_context,
             } = &mut *scratch;
-            let mut splitter = SplitByCharacterClass::new(sentence, is_han_default);
+            let mut splitter = SplitByCharacterClass::<()>::han_default(sentence);
 
             while let Some(state) = splitter.next_recording(chars) {
                 match state {
@@ -1286,6 +1362,53 @@ mod tests {
 
         let result: Vec<&str> = splitter.map(|x| x.as_str()).collect();
         expect![[r#"["讥䶯䶰䶱䶲䶳䶴䶵𦡦"]"#]].assert_eq(&format!("{:?}", result));
+    }
+
+    #[test]
+    fn test_split_han_default_matches_scalar() {
+        // `han_default` extends matched runs through the SIMD classifier on
+        // supported targets; runs and recorded characters must equal the
+        // scalar splitter's regardless.
+        let long_cjk = "中文测试字符串长度验证".repeat(30);
+        let long_ascii = "abc123+#&._%-".repeat(20);
+        let cases = [
+            "👪 PS: 我觉得开源有一个好处，就是能够敦促自己不断改进 👪，避免敞帚自珍",
+            "讥䶯䶰䶱䶲䶳䶴䶵𦡦",
+            "特殊天-1 B超 重A庆",
+            "中a文🙂测试，标点。后续文本",
+            "",
+            "a",
+            "中",
+            "🙂",
+            &long_cjk,
+            &long_ascii,
+            &format!("{long_cjk}🙂{long_cjk}"),
+            &format!("{long_cjk}，{long_cjk}"),
+            &format!("{long_cjk}㐀{long_cjk}"),
+            &format!("{long_ascii}{long_cjk}{long_ascii}"),
+            &format!("{long_ascii} {long_ascii}é{long_ascii}"),
+            &"中文🙂".repeat(50),
+        ];
+        type Run<'t> = (bool, &'t str, Vec<(u32, char)>);
+        fn collect<'t>(mut splitter: SplitByCharacterClass<'t, impl Fn(char) -> bool>) -> Vec<Run<'t>> {
+            let mut runs = Vec::new();
+            let mut chars = Vec::new();
+            while let Some(state) = splitter.next_recording(&mut chars) {
+                runs.push((matches!(state, SplitState::Matched(_)), state.as_str(), chars.clone()));
+            }
+            runs
+        }
+        for text in cases {
+            for start in text.char_indices().map(|(i, _)| i).take(20) {
+                let text = &text[start..];
+                let fast = collect(SplitByCharacterClass::<()>::han_default(text));
+                let scalar = collect(SplitByCharacterClass::new(text, is_han_default));
+                assert_eq!(fast, scalar, "mismatch for: {text}");
+                for (_, run, chars) in &fast {
+                    assert!(run.char_indices().map(|(i, c)| (i as u32, c)).eq(chars.iter().copied()));
+                }
+            }
+        }
     }
 
     #[test]
