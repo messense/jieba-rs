@@ -65,6 +65,7 @@ cargo bench --all-features
 * [`cang-jie` Chinese tokenizer for tantivy](https://github.com/DCjanus/cang-jie)
 * [`tantivy-jieba` An adapter that bridges between tantivy and jieba-rs](https://github.com/jiegec/tantivy-jieba)
 * [`jieba-wasm` the WebAssembly binding](https://github.com/fengkx/jieba-wasm)
+* [`WasmJieba` WebAssembly bindings for Web and Node.js](https://github.com/ZnqbuZ/WasmJieba)
 * [`jiebaRS` R binding](https://github.com/Yousa-Mirage/jiebaRS)
 * [`emacs-jieba-rs` binding and minor mode extension](https://github.com/brsvh/emacs-jieba-rs.git) 
 
